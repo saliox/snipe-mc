@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' https: data:;" />
+  <title>Minecraft Sniper</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="scanlines"></div>
+
+  <header class="term-head">
+    <pre class="banner" id="banner"></pre>
+    <div class="idline">
+      <span class="prompt">C:\sniper&gt;</span>
+      <span id="userLine">whoami :: <span class="muted">non connecté</span></span>
+      <span class="sep">|</span>
+      <span id="appVer" class="muted"></span>
+      <span class="sep">|</span>
+      <a href="#" id="checkUpdateLink" class="link">check_updates</a>
+    </div>
+  </header>
+
+  <div id="configWarn" class="banner-warn hidden">
+    [!] MS_CLIENT_ID absent du .env — le login MS échouera (le token collé marche quand même).
+  </div>
+  <div id="updateBanner" class="banner-upd hidden">
+    <div class="upd-row"><span id="updateText"></span><button id="updateBtn" class="btn ok tiny">MAJ</button></div>
+    <div id="updateProgress" class="uprog hidden"><div id="updateBar"></div></div>
+  </div>
+
+  <main class="grid">
+    <!-- TOKEN -->
+    <section class="mod">
+      <div class="mod-h">[ TOKEN ]</div>
+      <textarea id="token" class="in mono" rows="2" placeholder="Colle ici le bearer token Minecraft (access token)…" spellcheck="false"></textarea>
+      <div class="row">
+        <button id="tokenSetBtn" class="btn ok">SET TOKEN</button>
+        <button id="loginBtn" class="btn">MS LOGIN</button>
+        <button id="tokenClearBtn" class="btn ghost">CLEAR</button>
+        <span id="tokenStatus" class="status"></span>
+      </div>
+    </section>
+
+    <!-- CHANGE USERNAME -->
+    <section class="mod">
+      <div class="mod-h">[ CHANGE USERNAME ]</div>
+      <div class="row">
+        <input id="newName" class="in mono" placeholder="nouveau pseudo" autocomplete="off" spellcheck="false" />
+        <button id="changeBtn" class="btn danger">CHANGE USERNAME</button>
+      </div>
+      <div class="hint">Renomme le compte du token actif. Cooldown Java = 30 jours entre changements.</div>
+      <div id="changeResult" class="status"></div>
+    </section>
+
+    <!-- BULK CHECK -->
+    <section class="mod span2">
+      <div class="mod-h">[ BULK CHECK ] <span class="muted" id="bulkCount"></span></div>
+      <div class="row">
+        <button id="loadTxtBtn" class="btn">LOAD .TXT</button>
+        <button id="genToBulkBtn" class="btn ghost">← depuis GENERATE</button>
+        <label class="chk"><input type="checkbox" id="useToken" /> statut compte (token)</label>
+        <span class="spacer"></span>
+        <label class="inl">delay(ms) <input id="delay" class="in num" type="number" value="200" min="0" /></label>
+      </div>
+      <textarea id="bulkNames" class="in mono tall" placeholder="un pseudo par ligne…" spellcheck="false"></textarea>
+      <div class="row">
+        <button id="bulkBtn" class="btn ok">CHECK ALL</button>
+        <button id="bulkStopBtn" class="btn danger hidden">STOP</button>
+        <button id="exportFreeBtn" class="btn ghost">EXPORT LIBRES</button>
+        <span class="spacer"></span>
+        <span id="bulkStats" class="status"></span>
+      </div>
+      <div id="bulkProgress" class="uprog hidden"><div id="bulkBar"></div></div>
+    </section>
+
+    <!-- GENERATE -->
+    <section class="mod">
+      <div class="mod-h">[ GENERATE ]</div>
+      <div class="row wrap">
+        <label class="inl">len <input id="genLen" class="in num" type="number" value="3" min="3" max="16" /></label>
+        <label class="inl">charset
+          <select id="genCharset" class="in sel">
+            <option value="alpha">a-z</option>
+            <option value="alphanum">a-z 0-9</option>
+            <option value="full">a-z 0-9 _</option>
+          </select>
+        </label>
+        <label class="inl">count <input id="genCount" class="in num" type="number" value="50" min="1" max="20000" /></label>
+        <label class="chk"><input type="checkbox" id="genExhaustive" /> tout énumérer</label>
+      </div>
+      <div class="row">
+        <button id="genBtn" class="btn ok">GENERATE</button>
+        <span id="genInfo" class="status"></span>
+      </div>
+    </section>
+
+    <!-- CHECK 1 PSEUDO -->
+    <section class="mod">
+      <div class="mod-h">[ CHECK 1 PSEUDO ]</div>
+      <div class="row">
+        <input id="checkName" class="in mono" placeholder="pseudo" autocomplete="off" spellcheck="false" />
+        <button id="checkBtn" class="btn ok">CHECK</button>
+      </div>
+      <div id="checkResult" class="status"></div>
+    </section>
+
+    <!-- SNIPE -->
+    <section class="mod span2">
+      <div class="mod-h">[ SNIPE (1 pseudo) ]
+        <button id="ntpBtn" class="btn ghost tiny">test horloge (NTP)</button>
+        <span id="ntpInfo" class="muted"></span>
+      </div>
+      <div class="row wrap">
+        <input id="snipeName" class="in mono" placeholder="pseudo à sniper" autocomplete="off" spellcheck="false" />
+        <label class="rad"><input type="radio" name="smode" value="monitor" checked /> surveiller</label>
+        <label class="rad"><input type="radio" name="smode" value="at" /> planifié</label>
+        <input id="snipeAt" class="in mono" type="datetime-local" step="1" disabled />
+        <label class="rad"><input type="radio" name="smode" value="in" /> dans</label>
+        <input id="snipeIn" class="in num" placeholder="45s" disabled />
+      </div>
+      <div class="row wrap">
+        <label class="inl">burst <input id="burst" class="in num" type="number" value="6" min="1" max="30" /></label>
+        <label class="inl">spacing(ms) <input id="spacing" class="in num" type="number" value="30" min="0" /></label>
+        <label class="inl">lead(ms) <input id="lead" class="in num" type="number" value="40" min="0" /></label>
+        <label class="inl">conns <input id="connections" class="in num" type="number" value="3" min="1" max="10" /></label>
+        <label class="chk"><input type="checkbox" id="skipNtp" /> skip NTP</label>
+      </div>
+      <div class="row">
+        <button id="snipeBtn" class="btn ok">SNIPE</button>
+        <button id="snipeStopBtn" class="btn danger hidden">STOP</button>
+        <span id="countdown" class="status"></span>
+      </div>
+    </section>
+
+    <!-- CONSOLE -->
+    <section class="mod span2 consolewrap">
+      <div class="mod-h">[ CONSOLE ] <button id="clearLogs" class="btn ghost tiny">clear</button></div>
+      <div id="log" class="console mono"></div>
+    </section>
+  </main>
+
+  <!-- Modale device code (login MS) -->
+  <div id="deviceModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="mod-h">[ MICROSOFT LOGIN ]</div>
+      <p>Une page s'est ouverte. Entre ce code :</p>
+      <div id="userCode" class="code">------</div>
+      <p class="hint">Page : <span id="verifUri"></span></p>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

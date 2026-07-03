@@ -1,0 +1,56 @@
+{
+  "name": "snipe-mc",
+  "version": "1.1.2",
+  "description": "Sniper de pseudos Minecraft (Microsoft/Java) — auth MSA, sync NTP, burst timing, UI Electron",
+  "type": "module",
+  "main": "gui/main.js",
+  "bin": {
+    "snipemc": "src/index.js"
+  },
+  "scripts": {
+    "cli": "node src/index.js",
+    "login": "node src/index.js login",
+    "start": "electron .",
+    "dist": "electron-builder --win",
+    "pack": "electron-builder --win --dir",
+    "portable": "node scripts/build-portable.mjs",
+    "installer": "node scripts/build-installer.mjs",
+    "publish:update": "node scripts/publish-update.mjs",
+    "serve:updates": "node scripts/serve-updates.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "undici": "^6.19.8"
+  },
+  "devDependencies": {
+    "electron": "^31.3.1",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.saliox.snipemc",
+    "productName": "Snipe MC",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "gui/**/*",
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Snipe MC"
+    }
+  }
+}
