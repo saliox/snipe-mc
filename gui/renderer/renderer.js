@@ -261,8 +261,8 @@ async function exportFree({ auto } = {}) {
 }
 
 window.api.onBulkResult((r) => {
-  const cls = { free: 'free', taken: 'taken', error: 'err' }[r.state] || 'info';
-  const tag = { free: '[LIBRE]', taken: '[PRIS] ', error: '[ERR]  ' }[r.state] || '';
+  const cls = { free: 'free', taken: 'taken', error: 'err', invalid: 'warn' }[r.state] || 'info';
+  const tag = { free: '[LIBRE]', taken: '[PRIS] ', error: '[ERR]  ', invalid: '[INVAL]' }[r.state] || '';
   cprint(cls, `${tag} ${r.name.padEnd(16)} ${r.detail || ''}`);
   allResults.set(r.name.toLowerCase(), { name: r.name, state: r.state, detail: r.detail || '' });
   if (tally[r.state] != null) tally[r.state]++;
@@ -275,7 +275,9 @@ window.api.onBulkResult((r) => {
     }
   }
   if (r.total) $('bulkBar').style.width = Math.round((r.done / r.total) * 100) + '%';
-  if (!unlimited && allResults.size % 25 === 0) saveCheckpoint();
+  // Pas de checkpoint pendant un scan illimité (uniTimer actif jusqu'au nettoyage) :
+  // lastNames y est vide et allResults peut être énorme.
+  if (!uniTimer && allResults.size % 25 === 0) saveCheckpoint();
 });
 function uniLine() {
   const secs = (Date.now() - uniStart) / 1000;
@@ -373,6 +375,8 @@ $('genUnlimitedBtn').onclick = async () => {
     await runBulk(names, { silent: true });
     if (!unlimited) break; // stoppé (manuel ou seuil) pendant le batch
     if (unlimitedThreshold && freeList.length >= unlimitedThreshold) { cprint('ok', `Seuil de ${unlimitedThreshold} libres atteint.`); break; }
+    // Garde-fou mémoire : le scan illimité retient tout (dédup + CSV).
+    if (allResults.size >= 500000) { cprint('warn', 'Limite mémoire (500k checkés) atteinte — arrêt du scan illimité.'); break; }
   }
   unlimited = false;
   clearInterval(uniTimer); uniTimer = null;

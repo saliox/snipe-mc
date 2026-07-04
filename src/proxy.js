@@ -39,6 +39,10 @@ export async function testProxies(lines, { timeoutMs = 5000, concurrency = 50, o
       await body.dump();
       return statusCode >= 200 && statusCode < 400;
     })();
+    // Si le timeout gagne la course, `probe` reste en vol et finira par rejeter
+    // (ou sera avorté par agent.destroy) : on avale ce rejet tardif ici pour
+    // éviter un UnhandledPromiseRejection (fréquent sur les proxies morts).
+    probe.catch(() => {});
     // Cap DUR : le worker n'attend jamais plus de timeoutMs sur un proxy bloqué.
     let ok = false;
     try { ok = await Promise.race([probe, new Promise((r) => setTimeout(() => r('to'), timeoutMs))]); }

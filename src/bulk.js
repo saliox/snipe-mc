@@ -33,20 +33,27 @@ export async function bulkCheck(names, opts = {}) {
   // File dédoublonnée (insensible à la casse) + rapport immédiat des invalides.
   const queue = [];
   const seen = new Set();
-  let invalid = 0;
+  const invalids = [];
   for (const raw of names) {
     const name = String(raw).trim();
     if (!name) continue;
     const key = name.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    if (!validName(name)) { invalid++; continue; }
+    if (!validName(name)) { invalids.push(name); continue; }
     queue.push({ name, attempts: 0 });
   }
   const retryQ = [];
   const total = queue.length;
+  const invalid = invalids.length;
   const freeList = [];
   let checked = 0, free = 0, taken = 0, errors = 0;
+
+  // Émet les invalides (état final) : ils entrent dans allResults côté UI, donc
+  // la reprise ne les considère plus comme « restants » indéfiniment.
+  for (const name of invalids) {
+    onResult({ done: checked, total, name, state: 'invalid', detail: 'format invalide (3-16, [A-Za-z0-9_])' });
+  }
 
   // Contrôleur adaptatif
   let interval = Math.max(START_INTERVAL, floor);
