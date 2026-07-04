@@ -1,5 +1,5 @@
 // Processus principal Electron. Fait le pont entre l'UI et le moteur de snipe.
-import { app, BrowserWindow, ipcMain, shell, dialog, nativeImage } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, dialog, nativeImage, session, Menu } from 'electron';
 import { request } from 'undici';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -60,8 +60,10 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,           // durcissement : renderer en bac à sable
+      sandbox: true,            // renderer en bac à sable
+      webviewTag: false,        // pas de <webview>
       spellcheck: false,
+      devTools: !app.isPackaged, // DevTools désactivés en version packagée
     },
   });
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
@@ -87,9 +89,30 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // Tokens dans userData (persistant, hors dossier d'install) et chiffrés.
+  process.env.SNIPE_DATA_DIR = app.getPath('userData');
+
+  // Durcissement session : refuse TOUTES les permissions (caméra, micro, géo,
+  // notifications, etc.) — l'app n'en a besoin d'aucune.
+  session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
+  session.defaultSession.setPermissionCheckHandler(() => false);
+
+  Menu.setApplicationMenu(null); // pas de menu applicatif
+
   createWindow();
   initUpdater(() => win);
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+});
+
+// Défense en profondeur : applique les gardes à TOUT webContents créé, et
+// interdit l'attachement de <webview>.
+app.on('web-contents-created', (_e, contents) => {
+  contents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url).catch(() => {});
+    return { action: 'deny' };
+  });
+  contents.on('will-navigate', (e, url) => { if (!url.startsWith('file://')) e.preventDefault(); });
+  contents.on('will-attach-webview', (e) => e.preventDefault());
 });
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
@@ -115,6 +138,7 @@ ipcMain.handle('whoami', async () => {
 
 ipcMain.handle('token-set', async (_e, token) => {
   try {
+    if (typeof token !== 'string' || token.length > 8192) throw new Error('Token invalide.');
     const profile = await setManualToken(token);
     return { ok: true, profile };
   } catch (e) { return { ok: false, error: e.message }; }

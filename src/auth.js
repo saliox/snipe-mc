@@ -9,9 +9,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { log, sleep, c } from './util.js';
+import { saveEncrypted, loadEncrypted } from './securebox.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const TOKEN_FILE = path.join(__dirname, '..', 'data', 'token.json');
+
+// Dossier de données : userData (GUI, défini par main.js) sinon data/ du projet
+// (CLI). Résolu à l'usage pour que main.js puisse définir SNIPE_DATA_DIR d'abord.
+function dataDir() { return process.env.SNIPE_DATA_DIR || path.join(__dirname, '..', 'data'); }
+function tokenFile() { return path.join(dataDir(), 'token.enc'); }
+function legacyFile() { return path.join(__dirname, '..', 'data', 'token.json'); }
 
 const TENANT = 'consumers';
 const DEVICECODE_URL = `https://login.microsoftonline.com/${TENANT}/oauth2/v2.0/devicecode`;
@@ -30,12 +36,22 @@ function clientId() {
 }
 
 function saveCache(obj) {
-  fs.mkdirSync(path.dirname(TOKEN_FILE), { recursive: true });
-  fs.writeFileSync(TOKEN_FILE, JSON.stringify(obj, null, 2));
+  saveEncrypted(tokenFile(), obj); // chiffré au repos
 }
 
 function loadCache() {
-  try { return JSON.parse(fs.readFileSync(TOKEN_FILE, 'utf8')); } catch { return null; }
+  const enc = loadEncrypted(tokenFile());
+  if (enc) return enc;
+  // Migration : ancien cache en clair -> ré-enregistré chiffré, puis supprimé.
+  try {
+    const old = JSON.parse(fs.readFileSync(legacyFile(), 'utf8'));
+    if (old && (old.msRefreshToken || old.accessToken)) {
+      saveEncrypted(tokenFile(), old);
+      fs.rmSync(legacyFile(), { force: true });
+      return old;
+    }
+  } catch { /* pas d'ancien cache */ }
+  return null;
 }
 
 // --- Étape 1 : device code flow Microsoft ---

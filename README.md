@@ -8,6 +8,20 @@ connexions pré-chauffées et une horloge synchronisée en NTP.
 > ⚠️ Le snipe ne fait que **changer le nom de ton compte** via l'API officielle
 > Minecraft. Ça ne touche à aucun compte tiers. Respecte le rate limit de Mojang.
 
+## Sécurité
+
+- **Tokens chiffrés au repos** : le cache de login Microsoft est chiffré (AES-256-GCM,
+  clé liée à la machine+utilisateur) dans le dossier userData ; les comptes
+  enregistrés sont chiffrés via DPAPI (`safeStorage`). Rien de sensible en clair.
+- **Renderer verrouillé** : `contextIsolation`, `sandbox`, `nodeIntegration:false`,
+  `webviewTag:false`, DevTools coupés en version packagée, **CSP** stricte
+  (`default-src 'none'`), navigation et pop-ups bloqués, toutes les permissions
+  (caméra/micro/géo/notifs) refusées.
+- **Token jamais exposé** : les proxies ne voient jamais ton bearer token (checks
+  publics anonymes seulement) ; il ne passe pas non plus par un proxy.
+- **Auto-update signé par empreinte** : chaque MAJ est vérifiée par **SHA-256**
+  avant installation (Releases GitHub publiques).
+
 ## Deux façons de l'utiliser
 
 - **App fenêtrée** (`.exe`) : interface **style terminal** (« MINECRAFT SNIPER »),
