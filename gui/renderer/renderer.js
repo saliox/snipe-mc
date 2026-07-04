@@ -231,10 +231,11 @@ $('bulkBtn').onclick = () => {
   lastNames = bulkNamesArray();       // nouvelle liste complète suivie
   runBulk(lastNames);
 };
-$('bulkStopBtn').onclick = async () => { await window.api.bulkStop(); cprint('warn', 'Arrêt demandé…'); $('resumeBtn').classList.remove('hidden'); };
+$('bulkStopBtn').onclick = async () => { await window.api.bulkStop(); cprint('warn', 'Arrêt demandé…'); $('resumeBtn').disabled = false; };
 let resumeUnlimited = false; // la dernière session rechargée était un scan illimité
 $('resumeBtn').onclick = () => {
-  $('resumeBtn').classList.add('hidden');
+  if ($('resumeBtn').disabled) return;
+  $('resumeBtn').disabled = true; // réactivé à la fin du scan déclenché
   // Reprise d'un scan ILLIMITÉ : on relance en conservant les résultats accumulés
   // (le dédoublonnage évite de re-checker ce qui l'a déjà été).
   if (resumeUnlimited) {
@@ -417,7 +418,7 @@ async function loadCheckpoint() {
       if (o.filters) { $('filterOg').checked = !!o.filters.og; $('filterNoRepeat').checked = !!o.filters.noRepeat; }
       $('unlimitedInfo').innerHTML = `∞ ${allResults.size} checkés · <span class="free">${tally.free} libres</span> (session précédente)`;
       resumeUnlimited = true;
-      $('resumeBtn').classList.remove('hidden');
+      $('resumeBtn').disabled = false;
       cprint('info', `Scan illimité précédent rechargé : ${allResults.size} checkés, ${freeList.length} libres — REPRENDRE pour continuer.`);
       return;
     }
@@ -430,7 +431,7 @@ async function loadCheckpoint() {
     const remaining = lastNames.filter((n) => !allResults.has(n.toLowerCase()));
     // Le bouton REPRENDRE est TOUJOURS proposé quand une session existe :
     // reprend les restants, ou relance la liste si la session était terminée.
-    $('resumeBtn').classList.remove('hidden');
+    $('resumeBtn').disabled = false;
     if (remaining.length) {
       cprint('info', `Dernière session rechargée : ${remaining.length}/${lastNames.length} restants — REPRENDRE pour continuer.`);
     } else {
@@ -442,7 +443,7 @@ async function loadCheckpoint() {
 function setBulkRunning(on) {
   $('bulkBtn').classList.toggle('hidden', on);
   $('bulkStopBtn').classList.toggle('hidden', !on);
-  if (on) $('resumeBtn').classList.add('hidden');
+  $('resumeBtn').disabled = on; // désactivé pendant le scan, réactivé après (session dispo)
   $('genUnlimitedBtn').disabled = on;
 }
 
@@ -466,6 +467,7 @@ function setUnlimitedRunning(on) {
   $('genUnlimitedStopBtn').classList.toggle('hidden', !on);
   $('bulkBtn').disabled = on;
   $('genBtn').disabled = on;
+  $('resumeBtn').disabled = on; // désactivé pendant le scan ∞
 }
 function updateUniInfo() {
   const html = uniLine();
@@ -527,7 +529,7 @@ async function startUnlimited(fresh) {
   $('bulkEta').textContent = '';
   cprint('ok', `Scan illimité terminé — ${allResults.size} checkés, ${freeList.length} libres.`);
   // Propose de reprendre dans la même session (résultats conservés).
-  if (allResults.size) { resumeUnlimited = true; $('resumeBtn').classList.remove('hidden'); }
+  if (allResults.size) { resumeUnlimited = true; $('resumeBtn').disabled = false; }
   await showTopFree();
   await exportFree({ auto: true });
 };
