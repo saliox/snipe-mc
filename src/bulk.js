@@ -65,6 +65,7 @@ export async function bulkCheck(names, opts = {}) {
     const etaMs = ewmaRate > 0.01 ? (remaining / ewmaRate) * 1000 : null;
     onStats({
       done: checked, total, rate: ewmaRate, etaMs,
+      free, taken, errors,
       inFlight, intervalMs: Math.round(interval),
       throttled: Date.now() < pauseUntil, throttleEvents,
     });

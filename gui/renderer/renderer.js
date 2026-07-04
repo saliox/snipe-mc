@@ -150,7 +150,7 @@ function bulkNamesArray() { return $('bulkNames').value.split(/\r?\n/).map((s) =
 function proxiesArray() { return $('proxies').value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean); }
 function updateBulkCount() {
   const n = bulkNamesArray().length;
-  $('bulkCount').textContent = n ? `${n} pseudos · ~${fmtDur(n * 56)} estimé` : '0 pseudo';
+  $('bulkCount').textContent = n ? `${n} pseudos` : '0 pseudo';
 }
 $('bulkNames').addEventListener('input', updateBulkCount);
 $('proxies').addEventListener('input', () => { $('proxyCount').textContent = `${proxiesArray().length} proxies`; });
@@ -235,7 +235,9 @@ window.api.onBulkResult((r) => {
 window.api.onBulkStats((s) => {
   const eta = s.etaMs != null ? fmtDur(s.etaMs) : '—';
   const rate = s.rate ? s.rate.toFixed(1) : '0';
-  $('bulkEta').innerHTML = `${s.done}/${s.total} · ${rate}/s · ETA ${eta} · cadence ~${Math.round(1000 / Math.max(1, s.intervalMs))}/s${s.throttled ? ' · <span class="warn">↓ throttle</span>' : ''}`;
+  $('bulkEta').innerHTML = `${s.done}/${s.total} · ${rate}/s · ETA ${eta} · cadence ~${Math.round(1000 / Math.max(1, s.intervalMs))}/s` +
+    ` · <span class="free">${s.free} libres</span> · <span class="taken">${s.taken} pris</span> · <span class="err">${s.errors} échecs</span>` +
+    `${s.throttled ? ' · <span class="warn">↓ throttle</span>' : ''}`;
 });
 
 function saveCheckpoint() {

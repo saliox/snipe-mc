@@ -16,45 +16,77 @@ const SS = 4;          // supersampling
 const H = N * SS;      // rendu hi-res
 
 // Couleurs
-const BG = [11, 15, 11];       // fond quasi noir verdâtre
-const BORDER = [25, 45, 25];   // liseré
-const GREEN = [57, 255, 20];   // vert terminal
-const DIMGREEN = [26, 120, 12];
+const BG_C = [14, 26, 16];     // centre du fond
+const BG_E = [5, 9, 6];        // bord du fond (vignette)
+const LENS = [8, 18, 11];      // verre de la lunette
+const LENS_HI = [24, 58, 30];  // reflet du verre
+const GREEN = [57, 255, 20];
+const GBRIGHT = [180, 255, 150];
+const GDIM = [22, 110, 12];
+const OUT = [3, 7, 4];         // liseré sombre pour détacher l'anneau
+const RIM = [30, 60, 34];      // liseré externe
 
 const dist = (x, y, cx, cy) => Math.hypot(x - cx, y - cy);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const mix = (c1, c2, t) => [c1[0] + (c2[0] - c1[0]) * t, c1[1] + (c2[1] - c1[1]) * t, c1[2] + (c2[2] - c1[2]) * t];
 function sdRoundRect(px, py, cx, cy, hw, hh, r) {
   const qx = Math.abs(px - cx) - hw + r, qy = Math.abs(py - cy) - hh + r;
   return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - r;
 }
-const inBar = (px, py, cx, cy, hw, hh) => Math.abs(px - cx) <= hw && Math.abs(py - cy) <= hh;
 
 // Couleur (hard-edge) au point hi-res ; alpha 0 = transparent.
 function colorAt(x, y) {
-  const cx = H / 2, cy = H / 2;
-  const s = H / N; // échelle px logique -> hi-res
+  const cx = H / 2, cy = H / 2, s = H / N;
 
-  // Fond arrondi
-  if (sdRoundRect(x, y, cx, cy, H / 2 - 4 * s, H / 2 - 4 * s, 46 * s) > 0) return [0, 0, 0, 0];
+  // Fond arrondi (transparent dehors)
+  const sd = sdRoundRect(x, y, cx, cy, H / 2 - 4 * s, H / 2 - 4 * s, 48 * s);
+  if (sd > 0) return [0, 0, 0, 0];
 
   const d = dist(x, y, cx, cy);
-  const ring = 96 * s, ringW = 7 * s;
+  const ringR = 90 * s, ringHalf = 7.5 * s;
+  const lensR = ringR - ringHalf;
+  const armHalf = 3.4 * s, gap = 16 * s, dotR = 6.5 * s;
 
-  // Anneau de visée (avec léger halo)
-  if (Math.abs(d - ring) <= ringW) return [...GREEN, 255];
-  if (Math.abs(d - ring) <= ringW + 3 * s) return [...DIMGREEN, 255];
+  // 1) Fond : dégradé radial (vignette)
+  let col = mix(BG_C, BG_E, clamp(d / (H * 0.62), 0, 1));
 
-  // Bras du réticule (gap central)
-  const armW = 6 * s, gap = 26 * s, reach = 118 * s;
-  if (inBar(x, y, cx, cy, armW, reach) && (Math.abs(y - cy) > gap)) return [...GREEN, 255];
-  if (inBar(x, y, cx, cy, reach, armW) && (Math.abs(x - cx) > gap)) return [...GREEN, 255];
+  // 2) Verre de la lunette (cercle intérieur) + reflet doux
+  if (d <= lensR) {
+    const hl = clamp(1 - dist(x, y, cx - lensR * 0.34, cy - lensR * 0.34) / (lensR * 1.15), 0, 1);
+    col = mix(LENS, LENS_HI, Math.pow(hl, 1.6) * 0.85);
+  }
 
-  // Point central
-  if (d <= 9 * s) return [...GREEN, 255];
+  // 3) Mil-dots le long des bras
+  const dotHalf = 2.5 * s;
+  for (const m of [34 * s, 55 * s, 76 * s]) {
+    if (Math.abs(x - cx) <= dotHalf && Math.abs(Math.abs(y - cy) - m) <= dotHalf) col = GREEN;
+    if (Math.abs(y - cy) <= dotHalf && Math.abs(Math.abs(x - cx) - m) <= dotHalf) col = GREEN;
+  }
 
-  // Liseré interne
-  if (sdRoundRect(x, y, cx, cy, H / 2 - 4 * s, H / 2 - 4 * s, 46 * s) > -3 * s) return [...BORDER, 255];
+  // 4) Réticule fin (gap central), jusqu'à l'anneau
+  const reach = ringR + ringHalf;
+  if ((Math.abs(x - cx) <= armHalf && Math.abs(y - cy) > gap && d <= reach) ||
+      (Math.abs(y - cy) <= armHalf && Math.abs(x - cx) > gap && d <= reach)) {
+    col = GREEN;
+  }
 
-  return [...BG, 255];
+  // 5) Anneau de visée avec liseré sombre (relief) + léger sheen vertical
+  const dr = Math.abs(d - ringR);
+  if (dr <= ringHalf) {
+    const sheen = clamp(0.9 + 0.28 * ((cy - y) / ringR), 0.72, 1.18);
+    col = [clamp(GREEN[0] * sheen, 0, 255), clamp(GREEN[1] * sheen, 0, 255), clamp(GREEN[2] * sheen, 0, 255)];
+  } else if (dr <= ringHalf + 2 * s) {
+    col = OUT;
+  }
+
+  // 6) Point central + halo
+  if (d <= dotR) col = GBRIGHT;
+  else if (d <= dotR + 3 * s) col = mix(GREEN, GBRIGHT, 0.5);
+
+  // 7) Liseré externe fin (contour de l'icône)
+  if (sd > -3.5 * s) col = mix(col, RIM, 0.7);
+
+  return [Math.round(col[0]), Math.round(col[1]), Math.round(col[2]), 255];
 }
 
 // Rendu hi-res puis downscale moyenné -> AA
