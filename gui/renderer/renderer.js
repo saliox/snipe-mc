@@ -221,7 +221,7 @@ async function runBulk(names, { silent = false, recheck = false } = {}) {
   if (errs.length) await runBulk(errs, { recheck: true });
   await saveCheckpointNow();
   await showTopFree();
-  await exportFree({ auto: true });
+  await exportAllFree({ auto: true });
   refreshHistStats();
 }
 
@@ -338,6 +338,25 @@ async function exportFree({ auto } = {}) {
   if (r.canceled) { cprint('info', `Enregistrement annulé (${freeList.length} libres gardés — bouton EXPORT LIBRES dispo).`); return; }
   if (r.ok) cprint('ok', `${freeList.length} pseudos libres → ${r.path}`);
   else cprint('err', 'Export: ' + (r.error || 'échec'));
+}
+
+// Propose un .txt de TOUS les pseudos libres connus (cumul de toutes les sessions,
+// depuis l'historique), triés du meilleur au moins bon. Appelé en fin de scan.
+async function exportAllFree({ auto } = {}) {
+  const r = await window.api.historyFreeAll();
+  const names = (r && r.ok && r.names) ? r.names : [];
+  if (!names.length) {
+    if (!auto) cprint('warn', 'Aucun pseudo libre connu.');
+    else cprint('info', 'Aucun pseudo libre trouvé — pas de fichier à proposer.');
+    return;
+  }
+  const rk = await window.api.rankNames(names);
+  const lines = (rk && rk.ok) ? rk.ranked.map((x) => x.name) : names;
+  const stamp = new Date().toISOString().slice(0, 10);
+  const res = await window.api.saveTxt({ suggested: `tous-les-libres-${names.length}-${stamp}.txt`, content: lines.join('\n') + '\n' });
+  if (res.canceled) { cprint('info', `${names.length} libres connus gardés (bouton « exporter libres connus » dispo).`); return; }
+  if (res.ok) cprint('ok', `📄 ${names.length} pseudos libres → ${res.path}`);
+  else cprint('err', 'Export: ' + (res.error || 'échec'));
 }
 
 window.api.onBulkResult((r) => {
@@ -531,7 +550,7 @@ async function startUnlimited(fresh) {
   // Propose de reprendre dans la même session (résultats conservés).
   if (allResults.size) { resumeUnlimited = true; $('resumeBtn').disabled = false; }
   await showTopFree();
-  await exportFree({ auto: true });
+  await exportAllFree({ auto: true });
 };
 
 // ----- Check 1 pseudo -----
