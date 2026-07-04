@@ -172,18 +172,19 @@ $('loadProxyBtn').onclick = async () => {
 
 // names = pseudos à traiter ce run (peut être un sous-ensemble en cas de reprise).
 // lastNames (la liste complète suivie) est géré par les appelants, PAS ici.
-async function runBulk(names) {
-  if (!names.length) { cprint('warn', 'Liste vide.'); return; }
-  setBulkRunning(true);
+// opts.silent : batch d'un scan illimité -> pas de résumé/export/boutons bulk.
+async function runBulk(names, { silent = false } = {}) {
+  if (!names.length) { if (!silent) cprint('warn', 'Liste vide.'); return; }
+  if (!silent) setBulkRunning(true);
   $('bulkBar').style.width = '0%';
   $('bulkProgress').classList.remove('hidden');
   const proxies = proxiesArray();
-  cprint('step', `BULK CHECK — ${names.length} pseudos${proxies.length ? ` · ${proxies.length} proxies` : ''}`);
+  if (!silent) cprint('step', `BULK CHECK — ${names.length} pseudos${proxies.length ? ` · ${proxies.length} proxies` : ''}`);
   const r = await window.api.bulkCheck({ names, delayMs: Number($('delay').value), useToken: $('useToken').checked, proxies });
-  setBulkRunning(false);
-  $('bulkEta').textContent = '';
-  if (!r.ok) { cprint('err', 'Bulk: ' + r.error); return; }
+  if (!silent) { setBulkRunning(false); $('bulkEta').textContent = ''; }
+  if (!r.ok) { if (!silent) cprint('err', 'Bulk: ' + r.error); return; }
   const s = r.summary;
+  if (silent) return; // le scan illimité gère résumé/export/checkpoint globalement
   cprint('ok', `Terminé en ${(s.elapsedMs / 1000).toFixed(1)}s — libres:${s.free} pris:${s.taken} inval:${s.invalid} err:${s.errors}${s.throttleEvents ? ` · ${s.throttleEvents} throttles gérés` : ''}`);
   $('bulkStats').innerHTML = `<span class="ok">${s.free} libres</span> · ${s.taken} pris · ${s.invalid} inval. · ${s.errors} err.`;
   saveCheckpoint();
@@ -236,9 +237,16 @@ window.api.onBulkResult((r) => {
   const tag = { free: '[LIBRE]', taken: '[PRIS] ', error: '[ERR]  ' }[r.state] || '';
   cprint(cls, `${tag} ${r.name.padEnd(16)} ${r.detail || ''}`);
   allResults.set(r.name.toLowerCase(), { name: r.name, state: r.state, detail: r.detail || '' });
-  if (r.state === 'free') freeList.push(r.name);
+  if (r.state === 'free') {
+    freeList.push(r.name);
+    // Scan illimité : coupe le batch dès que le seuil de libres est atteint.
+    if (unlimited && unlimitedThreshold && freeList.length >= unlimitedThreshold) {
+      unlimited = false;
+      window.api.bulkStop();
+    }
+  }
   if (r.total) $('bulkBar').style.width = Math.round((r.done / r.total) * 100) + '%';
-  if (allResults.size % 25 === 0) saveCheckpoint();
+  if (!unlimited && allResults.size % 25 === 0) saveCheckpoint();
 });
 window.api.onBulkStats((s) => {
   const eta = s.etaMs != null ? fmtDur(s.etaMs) : '—';
@@ -273,7 +281,68 @@ function setBulkRunning(on) {
   $('bulkBtn').classList.toggle('hidden', on);
   $('bulkStopBtn').classList.toggle('hidden', !on);
   if (on) $('resumeBtn').classList.add('hidden');
+  $('genUnlimitedBtn').disabled = on;
 }
+
+// ----- Scan illimité (génère + check en boucle jusqu'au stop ou au seuil) -----
+let unlimited = false;
+let unlimitedThreshold = 0;
+let uniStart = 0, uniTimer = null;
+
+function currentGenOpts(count) {
+  return {
+    mode: $('genMode').value,
+    length: Number($('genLen').value),
+    charset: $('genCharset').value,
+    count,
+    pattern: $('genPattern').value.trim(),
+    filters: { og: $('filterOg').checked, noRepeat: $('filterNoRepeat').checked },
+  };
+}
+function setUnlimitedRunning(on) {
+  $('genUnlimitedBtn').classList.toggle('hidden', on);
+  $('genUnlimitedStopBtn').classList.toggle('hidden', !on);
+  $('bulkBtn').disabled = on;
+  $('genBtn').disabled = on;
+}
+function updateUniInfo() {
+  const secs = (Date.now() - uniStart) / 1000;
+  const rate = secs > 0 ? allResults.size / secs : 0;
+  $('unlimitedInfo').innerHTML = `∞ ${allResults.size} checkés · <span class="free">${freeList.length} libres</span> · ${rate.toFixed(1)}/s · ${fmtDur(secs * 1000)}`;
+}
+$('genUnlimitedStopBtn').onclick = () => { unlimited = false; window.api.bulkStop(); cprint('warn', 'Arrêt du scan illimité…'); };
+$('genUnlimitedBtn').onclick = async () => {
+  if (unlimited) return;
+  unlimited = true;
+  unlimitedThreshold = Number($('unlimitedThreshold').value) || 0;
+  freeList = []; allResults = new Map(); lastNames = [];
+  uniStart = Date.now();
+  setUnlimitedRunning(true);
+  $('bulkProgress').classList.remove('hidden');
+  cprint('step', `SCAN ILLIMITÉ (${$('genMode').value})${unlimitedThreshold ? ` · stop à ${unlimitedThreshold} libres` : ' · stop manuel'}`);
+  clearInterval(uniTimer); uniTimer = setInterval(updateUniInfo, 500);
+
+  let emptyStreak = 0;
+  while (unlimited) {
+    const gr = await window.api.generate(currentGenOpts(300));
+    if (!gr.ok) { cprint('err', 'Gen: ' + gr.error); break; }
+    const names = gr.names.filter((n) => !allResults.has(n.toLowerCase()));
+    if (!names.length) {
+      if (++emptyStreak >= 8) { cprint('warn', 'Espace de génération épuisé — arrêt du scan illimité.'); break; }
+      continue;
+    }
+    emptyStreak = 0;
+    await runBulk(names, { silent: true });
+    if (!unlimited) break; // stoppé (manuel ou seuil) pendant le batch
+    if (unlimitedThreshold && freeList.length >= unlimitedThreshold) { cprint('ok', `Seuil de ${unlimitedThreshold} libres atteint.`); break; }
+  }
+  unlimited = false;
+  clearInterval(uniTimer); updateUniInfo();
+  setUnlimitedRunning(false);
+  $('bulkEta').textContent = '';
+  cprint('ok', `Scan illimité terminé — ${allResults.size} checkés, ${freeList.length} libres.`);
+  await exportFree({ auto: true });
+};
 
 // ----- Check 1 pseudo -----
 $('checkBtn').onclick = async () => {
