@@ -106,11 +106,14 @@
         <button id="resumeBtn" class="btn hidden">REPRENDRE</button>
         <button id="exportFreeBtn" class="btn ghost">EXPORT LIBRES</button>
         <button id="exportCsvBtn" class="btn ghost">EXPORT CSV</button>
+        <button id="claimBestBtn" class="btn danger hidden">CLAIM LE MEILLEUR</button>
         <span class="spacer"></span>
         <span id="bulkStats" class="status"></span>
       </div>
       <div id="bulkEta" class="status eta"></div>
       <div id="bulkProgress" class="uprog hidden"><div id="bulkBar"></div></div>
+      <div id="freeChips" class="chips"></div>
+      <div class="hint">Clique un pseudo libre pour <b>réclamer</b> (change ton pseudo sur le compte du token actif).</div>
     </section>
 
     <!-- GENERATE -->
@@ -150,6 +153,13 @@
         <button id="genUnlimitedStopBtn" class="btn danger hidden">STOP ∞</button>
         <label class="inl">stop à X libres <input id="unlimitedThreshold" class="in num" type="number" value="0" min="0" /></label>
       </div>
+      <div class="row wrap">
+        <label class="chk"><input type="checkbox" id="autoClaim" /> auto-claim le 1er libre qui matche</label>
+        <label class="inl">tier ≥
+          <select id="autoClaimTier" class="in sel"><option>S</option><option>A</option><option selected>B</option><option>C</option><option>D</option></select>
+        </label>
+        <label class="inl">len ≤ <input id="autoClaimLen" class="in num" type="number" value="16" min="3" max="16" /></label>
+      </div>
       <div id="unlimitedInfo" class="status eta"></div>
     </section>
 
@@ -171,10 +181,29 @@
         <button id="histSearchBtn" class="btn ok">CHERCHER</button>
       </div>
       <div id="histResult" class="status"></div>
+      <div id="histStatsPanel" class="statsgrid"></div>
       <div class="row">
         <button id="histExportBtn" class="btn ghost">exporter libres connus</button>
         <button id="histClearBtn" class="btn ghost tiny">vider</button>
+        <span class="spacer"></span>
+        <button id="cfgExportBtn" class="btn ghost tiny">export config</button>
+        <button id="cfgImportBtn" class="btn ghost tiny">import config</button>
       </div>
+    </section>
+
+    <!-- WATCHLIST -->
+    <section class="mod">
+      <div class="mod-h">[ WATCHLIST ]
+        <span id="monitorState" class="muted">○ arrêtée</span>
+        <button id="monitorToggleBtn" class="btn ok tiny">démarrer surveillance</button>
+      </div>
+      <div class="row">
+        <input id="watchInput" class="in mono" placeholder="pseudos à surveiller (espace/virgule)" autocomplete="off" spellcheck="false" />
+        <button id="watchAddBtn" class="btn">+ ajouter</button>
+      </div>
+      <label class="chk"><input type="checkbox" id="watchAutoclaim" /> auto-claim dès qu'un se libère (compte actif)</label>
+      <div id="watchList" class="chips"></div>
+      <div class="hint">Surveille en fond (même minimisé dans le tray). Notification Windows + son quand un pseudo se libère.</div>
     </section>
 
     <!-- SNIPE -->
@@ -190,6 +219,13 @@
         <input id="snipeAt" class="in mono" type="datetime-local" step="1" disabled />
         <label class="rad"><input type="radio" name="smode" value="in" /> dans</label>
         <input id="snipeIn" class="in num" placeholder="45s" disabled />
+      </div>
+      <div class="row wrap">
+        <label class="inl">dernier changement le
+          <input id="dropLastChange" class="in mono" type="date" />
+        </label>
+        <button id="dropCalcBtn" class="btn tiny">→ calculer le drop (+37j)</button>
+        <span id="dropInfo" class="muted"></span>
       </div>
       <div class="row wrap">
         <label class="inl">burst <input id="burst" class="in num" type="number" value="6" min="1" max="30" /></label>

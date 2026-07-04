@@ -1,6 +1,6 @@
 {
   "name": "snipe-mc",
-  "version": "1.6.6",
+  "version": "1.7.0",
   "description": "Sniper de pseudos Minecraft (Microsoft/Java) — auth MSA, sync NTP, burst timing, UI Electron",
   "type": "module",
   "main": "gui/main.js",

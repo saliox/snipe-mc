@@ -201,20 +201,24 @@ window.api.onProxyTestProgress((p) => { $('proxyCount').textContent = `test ${p.
 // names = pseudos à traiter ce run (peut être un sous-ensemble en cas de reprise).
 // lastNames (la liste complète suivie) est géré par les appelants, PAS ici.
 // opts.silent : batch d'un scan illimité -> pas de résumé/export/boutons bulk.
-async function runBulk(names, { silent = false } = {}) {
+async function runBulk(names, { silent = false, recheck = false } = {}) {
   if (!names.length) { if (!silent) cprint('warn', 'Liste vide.'); return; }
   if (!silent) setBulkRunning(true);
   $('bulkBar').style.width = '0%';
   $('bulkProgress').classList.remove('hidden');
   const proxies = proxiesArray();
-  if (!silent) cprint('step', `BULK CHECK — ${names.length} pseudos${proxies.length ? ` · ${proxies.length} proxies` : ''}`);
+  if (!silent) cprint('step', `${recheck ? 'RE-CHECK' : 'BULK CHECK'} — ${names.length} pseudos${proxies.length ? ` · ${proxies.length} proxies` : ''}`);
   const r = await window.api.bulkCheck({ names, delayMs: Number($('delay').value), useToken: $('useToken').checked, proxies });
   if (!silent) { setBulkRunning(false); $('bulkEta').textContent = ''; }
   if (!r.ok) { if (!silent) cprint('err', 'Bulk: ' + r.error); return; }
   const s = r.summary;
-  if (silent) return; // le scan illimité gère résumé/export/checkpoint globalement
+  if (silent) return;  // scan illimité : géré globalement
+  if (recheck) { cprint('ok', `Re-check terminé — ${s.free} récupérés libres, ${s.errors} encore en échec.`); return; }
   cprint('ok', `Terminé en ${(s.elapsedMs / 1000).toFixed(1)}s — libres:${s.free} pris:${s.taken} inval:${s.invalid} err:${s.errors}${s.throttleEvents ? ` · ${s.throttleEvents} throttles gérés` : ''}`);
   $('bulkStats').innerHTML = `<span class="ok">${s.free} libres</span> · ${s.taken} pris · ${s.invalid} inval. · ${s.errors} err.`;
+  // Re-check auto des échecs (réseau/proxy) UNE fois, avant de finaliser.
+  const errs = [...allResults.values()].filter((v) => v.state === 'error').map((v) => v.name);
+  if (errs.length) await runBulk(errs, { recheck: true });
   await saveCheckpointNow();
   await showTopFree();
   await exportFree({ auto: true });
@@ -270,11 +274,54 @@ async function rankedFree() {
   const r = await window.api.rankNames(freeList);
   return (r && r.ok) ? r.ranked : freeList.map((name) => ({ name, tier: '?' }));
 }
+let rankedFreeCache = [];
 async function showTopFree() {
-  if (!freeList.length) return;
+  if (!freeList.length) { $('freeChips').innerHTML = ''; $('claimBestBtn').classList.add('hidden'); return; }
   const ranked = await rankedFree();
+  rankedFreeCache = ranked;
   const top = ranked.slice(0, 8).map((x) => `${x.name}(${x.tier})`).join('  ');
   cprint('free', `★ meilleurs libres : ${top}`);
+  renderFreeChips(ranked);
+}
+// Chips cliquables : clic = réclamer (change username) le pseudo sur le token actif.
+function renderFreeChips(ranked) {
+  const box = $('freeChips');
+  box.innerHTML = ranked.slice(0, 60).map((x) =>
+    `<span class="chip" data-name="${esc(x.name)}"><span class="tier">${x.tier}</span> ${esc(x.name)}</span>`).join('');
+  $('claimBestBtn').classList.toggle('hidden', !ranked.length);
+}
+$('freeChips').onclick = (e) => {
+  const chip = e.target.closest('.chip');
+  if (chip) claimName(chip.dataset.name);
+};
+$('claimBestBtn').onclick = () => { if (rankedFreeCache[0]) claimName(rankedFreeCache[0].name); };
+async function claimName(name) {
+  if (!name) return;
+  if (!window.confirm(`Réclamer « ${name} » ? Ça change le pseudo du compte du token actif (cooldown 30 j).`)) return;
+  cprint('step', `Réclamation de ${name}…`);
+  const r = await window.api.changeUsername(name);
+  if (r.ok) { cprint('ok', `🎯 Pseudo changé en ${r.name} !`); refreshAccount(); }
+  else cprint('err', `Échec claim ${name} : ${r.reason || r.error || 'erreur'}`);
+}
+
+// Auto-claim (scan illimité) : réclame le 1er libre qui matche tier/longueur.
+let autoClaimDone = false;
+const TIERS = ['S', 'A', 'B', 'C', 'D'];
+async function maybeAutoClaim(name) {
+  if (autoClaimDone) return;
+  const rk = await window.api.rankNames([name]);
+  const item = rk.ok && rk.ranked[0];
+  if (!item) return;
+  const maxLen = Number($('autoClaimLen').value) || 16;
+  if (TIERS.indexOf(item.tier) <= TIERS.indexOf($('autoClaimTier').value) && name.length <= maxLen) {
+    autoClaimDone = true;
+    unlimited = false; window.api.bulkStop();
+    cprint('step', `Auto-claim de ${name} (${item.tier})…`);
+    const r = await window.api.changeUsername(name);
+    if (r.ok) cprint('ok', `🎯 Auto-claim réussi : pseudo changé en ${r.name} !`);
+    else cprint('err', `Auto-claim ${name} échoué : ${r.reason || r.error}`);
+    refreshAccount();
+  }
 }
 
 async function exportFree({ auto } = {}) {
@@ -300,6 +347,8 @@ window.api.onBulkResult((r) => {
   if (tally[r.state] != null) tally[r.state]++;
   if (r.state === 'free') {
     freeList.push(r.name);
+    // Auto-claim pendant le scan illimité : réclame le 1er libre qui matche.
+    if (unlimited && $('autoClaim').checked) maybeAutoClaim(r.name);
     // Scan illimité : coupe le batch dès que le seuil de libres est atteint.
     if (unlimited && unlimitedThreshold && freeList.length >= unlimitedThreshold) {
       unlimited = false;
@@ -441,6 +490,7 @@ $('genUnlimitedBtn').onclick = () => startUnlimited(true);
 async function startUnlimited(fresh) {
   if (unlimited) return;
   unlimited = true;
+  autoClaimDone = false;
   resumeUnlimited = false; // on lance/reprend : plus une proposition en attente
   unlimitedThreshold = Number($('unlimitedThreshold').value) || 0;
   if (fresh) { freeList = []; allResults = new Map(); tally = { free: 0, taken: 0, error: 0 }; }
@@ -510,7 +560,16 @@ $('checkBtn').onclick = async () => {
 // ----- Historique -----
 async function refreshHistStats() {
   const r = await window.api.historyStats();
-  if (r.ok) $('histStats').textContent = `${r.total} connus · ${r.free} libres`;
+  if (!r.ok) return;
+  $('histStats').textContent = `${r.total} connus · ${r.free} libres`;
+  const cell = (v, l) => `<div class="cell"><b>${v}</b><span>${l}</span></div>`;
+  $('histStatsPanel').innerHTML =
+    cell(r.total.toLocaleString('fr-FR'), 'checkés') +
+    cell(r.free.toLocaleString('fr-FR'), 'libres') +
+    cell(r.taken.toLocaleString('fr-FR'), 'pris') +
+    cell(r.rate.toFixed(1) + '%', 'taux libre') +
+    cell(r.free24, 'libres 24h') +
+    cell(r.free7, 'libres 7j');
 }
 $('histSearchBtn').onclick = async () => {
   const q = $('histSearch').value.trim();
@@ -670,10 +729,79 @@ $('cooldownBtn').onclick = async () => {
   } else { $('cooldownInfo').innerHTML = '<span class="muted">statut indéterminé</span>'; }
 };
 
+// ----- Planification du drop (#4) -----
+$('dropCalcBtn').onclick = () => {
+  const v = $('dropLastChange').value;
+  if (!v) { $('dropInfo').textContent = 'indique la date du dernier changement'; return; }
+  const drop = new Date(new Date(v).getTime() + 37 * 86400000);
+  // remplit le champ « planifié » (datetime-local, heure locale).
+  const p = (n) => String(n).padStart(2, '0');
+  $('snipeAt').value = `${drop.getFullYear()}-${p(drop.getMonth() + 1)}-${p(drop.getDate())}T${p(drop.getHours())}:${p(drop.getMinutes())}:00`;
+  document.querySelector('input[name="smode"][value="at"]').checked = true;
+  $('snipeAt').disabled = false; $('snipeIn').disabled = true;
+  const soon = drop.getTime() - Date.now();
+  $('dropInfo').innerHTML = `drop ≈ <span class="free">${drop.toLocaleString('fr-FR')}</span> (${soon > 0 ? 'dans ' + fmtDur(soon) : 'déjà passé'}) → mode planifié réglé`;
+};
+
+// ----- Export / import config (#7) -----
+$('cfgExportBtn').onclick = async () => {
+  const r = await window.api.configExport({ proxies: proxiesArray(), gen: currentGenOpts(50) });
+  if (r.canceled) return;
+  if (r.ok) cprint('ok', `Config exportée → ${r.path}`); else cprint('err', 'Export config: ' + r.error);
+};
+$('cfgImportBtn').onclick = async () => {
+  const r = await window.api.configImport();
+  if (r.canceled) return;
+  if (!r.ok) { cprint('err', 'Import config: ' + r.error); return; }
+  if (r.data.proxies?.length) { $('proxies').value = r.data.proxies.join('\n'); $('proxyCount').textContent = `${r.data.proxies.length} proxies`; }
+  const g = r.data.gen || {};
+  if (g.mode) { $('genMode').value = g.mode; syncGenMode(); }
+  if (g.length) $('genLen').value = g.length;
+  if (g.charset) $('genCharset').value = g.charset;
+  cprint('ok', 'Config importée (proxies, réglages, watchlist).');
+  refreshWatch();
+};
+
+// ----- Watchlist + surveillance (#3) -----
+async function refreshWatch() {
+  const r = await window.api.watchGet();
+  if (!r.ok) return;
+  $('watchList').innerHTML = r.names.map((n) =>
+    `<span class="chip" data-w="${esc(n)}">${esc(n)} <span class="x" data-del="${esc(n)}">✕</span></span>`).join('');
+}
+$('watchAddBtn').onclick = async () => {
+  const names = $('watchInput').value.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+  if (!names.length) return;
+  await window.api.watchAdd(names);
+  $('watchInput').value = '';
+  refreshWatch();
+};
+$('watchInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('watchAddBtn').click(); });
+$('watchList').onclick = async (e) => {
+  const del = e.target.closest('[data-del]');
+  if (del) { await window.api.watchRemove(del.dataset.del); refreshWatch(); return; }
+  const chip = e.target.closest('.chip');
+  if (chip && chip.dataset.w) { $('checkName').value = chip.dataset.w; $('checkBtn').click(); }
+};
+$('watchAutoclaim').onchange = () => window.api.monitorAutoclaim($('watchAutoclaim').checked);
+$('monitorToggleBtn').onclick = async () => {
+  const st = await window.api.monitorStatus();
+  if (st.on) await window.api.monitorStop(); else await window.api.monitorStart();
+};
+function setMonitorUI(on) {
+  $('monitorState').textContent = on ? '● surveillance active' : '○ arrêtée';
+  $('monitorState').className = on ? 'free' : 'muted';
+  $('monitorToggleBtn').textContent = on ? 'arrêter surveillance' : 'démarrer surveillance';
+}
+window.api.onMonitorStatus((s) => setMonitorUI(s.on));
+window.api.onWatchFree(({ name }) => { cprint('free', `★ WATCHLIST : ${name} est LIBRE !`); });
+
 // ----- Init -----
 refreshAccount();
 refreshAccounts();
 refreshHistStats();
+refreshWatch();
+window.api.monitorStatus().then((s) => { if (s.ok) { setMonitorUI(s.on); $('watchAutoclaim').checked = !!s.autoclaim; } });
 updateBulkCount();
 loadCheckpoint();
 cprint('step', 'Minecraft Sniper prêt. Colle un token ou connecte-toi (MS).');

@@ -1,5 +1,5 @@
 // Processus principal Electron. Fait le pont entre l'UI et le moteur de snipe.
-import { app, BrowserWindow, ipcMain, shell, dialog, nativeImage, session, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, dialog, nativeImage, session, Menu, Tray, Notification } from 'electron';
 import { request } from 'undici';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -24,7 +24,8 @@ function loadEnv() {
 }
 loadEnv();
 
-import { bus } from '../src/util.js';
+import { bus, sleep } from '../src/util.js';
+import * as watchlist from './watchlist.js';
 import { loginInteractive, cachedProfile } from '../src/auth.js';
 import { isNameFree, nameStatus, validName } from '../src/mojang.js';
 import { changeName, nameChangeInfo } from '../src/nameapi.js';
@@ -41,6 +42,9 @@ import { initUpdater, checkForUpdates, applyUpdate } from './updater.js';
 
 let win;
 let bulkStop = false;
+let tray = null;
+app.isQuitting = false;
+const monitor = { on: false, timer: null, ticking: false, notified: new Set(), autoclaim: false };
 
 const ICON = path.join(__dirname, '..', 'build', 'icon.png');
 
@@ -85,9 +89,79 @@ function createWindow() {
 
   bus.on('log', (e) => { if (win && !win.isDestroyed()) win.webContents.send('log', e); });
 
+  // Fermer la fenêtre = réduire dans le tray si la surveillance tourne
+  // (sinon l'app se ferme normalement). Le menu du tray permet de quitter.
+  win.on('close', (e) => {
+    if (!app.isQuitting && monitor.on) { e.preventDefault(); win.hide(); }
+  });
+
   win.webContents.once('did-finish-load', () => {
     setTimeout(() => checkForUpdates({ silent: true }), 3000);
   });
+}
+
+// --- Tray + moniteur de fond de la watchlist ---
+function createTray() {
+  try {
+    tray = new Tray(fs.existsSync(ICON) ? nativeImage.createFromPath(ICON).resize({ width: 16, height: 16 }) : nativeImage.createEmpty());
+    tray.setToolTip('Minecraft Sniper');
+    tray.on('click', showWindow);
+    updateTray();
+  } catch { /* tray indispo */ }
+}
+function showWindow() { if (win) { win.show(); win.focus(); } }
+function updateTray() {
+  if (!tray) return;
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Ouvrir Snipe MC', click: showWindow },
+    { label: monitor.on ? '● Surveillance active' : '○ Surveillance arrêtée', enabled: false },
+    { label: monitor.on ? 'Arrêter la surveillance' : 'Démarrer la surveillance', click: () => (monitor.on ? stopMonitor() : startMonitor()) },
+    { type: 'separator' },
+    { label: 'Quitter', click: () => { app.isQuitting = true; app.quit(); } },
+  ]));
+}
+function notifyFree(name) {
+  try { new Notification({ title: '🎯 Pseudo libre !', body: `${name} est disponible`, icon: fs.existsSync(ICON) ? ICON : undefined }).show(); } catch {}
+}
+function startMonitor() {
+  if (monitor.on) return;
+  monitor.on = true;
+  monitor.notified.clear();
+  monitor.timer = setInterval(monitorTick, 90000);
+  monitorTick();
+  updateTray();
+  if (win && !win.isDestroyed()) win.webContents.send('monitor-status', { on: true });
+}
+function stopMonitor() {
+  monitor.on = false;
+  clearInterval(monitor.timer); monitor.timer = null;
+  updateTray();
+  if (win && !win.isDestroyed()) win.webContents.send('monitor-status', { on: false });
+}
+async function monitorTick() {
+  if (monitor.ticking) return;
+  monitor.ticking = true;
+  try {
+    for (const name of watchlist.getWatch()) {
+      if (!monitor.on) break;
+      if (monitor.notified.has(name.toLowerCase())) continue;
+      let res; try { res = await isNameFree(name); } catch { res = null; }
+      if (res && res.free === true) {
+        monitor.notified.add(name.toLowerCase());
+        notifyFree(name);
+        bus.emit('log', { level: 'free', msg: `★ WATCHLIST : ${name} est LIBRE !`, t: Date.now() });
+        if (win && !win.isDestroyed()) win.webContents.send('watch-free', { name });
+        if (monitor.autoclaim) {
+          const active = await tryGetActiveToken();
+          if (active) {
+            const cr = await changeName(name, active.accessToken);
+            bus.emit('log', { level: cr.ok ? 'ok' : 'err', msg: cr.ok ? `Auto-claim : ${name} obtenu !` : `Auto-claim ${name} : ${cr.reason}`, t: Date.now() });
+          }
+        }
+      }
+      await sleep(1200); // espacé (respect rate limit)
+    }
+  } finally { monitor.ticking = false; }
 }
 
 app.whenReady().then(() => {
@@ -102,6 +176,7 @@ app.whenReady().then(() => {
   Menu.setApplicationMenu(null); // pas de menu applicatif
 
   createWindow();
+  createTray();
   initUpdater(() => win);
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
@@ -117,7 +192,7 @@ app.on('web-contents-created', (_e, contents) => {
   contents.on('will-attach-webview', (e) => e.preventDefault());
 });
 
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+app.on('window-all-closed', () => { if (process.platform !== 'darwin' && !monitor.on) app.quit(); });
 app.on('before-quit', () => { try { history.flushSync(); } catch { /* ignore */ } });
 
 // --- Meta / MAJ ---
@@ -239,6 +314,42 @@ ipcMain.handle('checkpoint-load', () => {
   catch { return { ok: true, data: null }; }
 });
 ipcMain.handle('checkpoint-clear', () => { try { fs.rmSync(CHECKPOINT_FILE(), { force: true }); } catch { /* ignore */ } return { ok: true }; });
+
+// --- Watchlist + moniteur de fond ---
+ipcMain.handle('watch-get', () => { try { return { ok: true, names: watchlist.getWatch() }; } catch (e) { return { ok: false, error: e.message }; } });
+ipcMain.handle('watch-add', (_e, names) => { try { const arr = Array.isArray(names) ? names : [names]; return { ok: true, names: watchlist.addWatch(arr) }; } catch (e) { return { ok: false, error: e.message }; } });
+ipcMain.handle('watch-remove', (_e, name) => { try { return { ok: true, names: watchlist.removeWatch(name) }; } catch (e) { return { ok: false, error: e.message }; } });
+ipcMain.handle('watch-clear', () => { try { return { ok: true, names: watchlist.clearWatch() }; } catch (e) { return { ok: false, error: e.message }; } });
+ipcMain.handle('monitor-start', () => { startMonitor(); return { ok: true, on: monitor.on }; });
+ipcMain.handle('monitor-stop', () => { stopMonitor(); return { ok: true, on: monitor.on }; });
+ipcMain.handle('monitor-status', () => ({ ok: true, on: monitor.on, autoclaim: monitor.autoclaim }));
+ipcMain.handle('monitor-autoclaim', (_e, v) => { monitor.autoclaim = !!v; return { ok: true, autoclaim: monitor.autoclaim }; });
+
+// --- Export / import config (sans les tokens : liés machine + sensibles) ---
+ipcMain.handle('config-export', async (_e, payload) => {
+  try {
+    const r = await dialog.showSaveDialog(win, { title: 'Exporter la config', defaultPath: 'snipe-mc-config.json', filters: [{ name: 'JSON', extensions: ['json'] }] });
+    if (r.canceled || !r.filePath) return { ok: false, canceled: true };
+    const cfg = {
+      version: 1,
+      watchlist: watchlist.getWatch(),
+      proxies: Array.isArray(payload?.proxies) ? payload.proxies : [],
+      gen: payload?.gen || {},
+      accountsLabels: listAccounts().accounts.map((a) => ({ label: a.label, name: a.name })), // infos seulement, pas de token
+    };
+    fs.writeFileSync(r.filePath, JSON.stringify(cfg, null, 2));
+    return { ok: true, path: r.filePath };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+ipcMain.handle('config-import', async () => {
+  try {
+    const r = await dialog.showOpenDialog(win, { title: 'Importer une config', filters: [{ name: 'JSON', extensions: ['json'] }], properties: ['openFile'] });
+    if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true };
+    const cfg = JSON.parse(fs.readFileSync(r.filePaths[0], 'utf8'));
+    if (Array.isArray(cfg.watchlist)) watchlist.addWatch(cfg.watchlist);
+    return { ok: true, data: { proxies: cfg.proxies || [], gen: cfg.gen || {}, watchlist: watchlist.getWatch() } };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
 
 // --- Générateur ---
 ipcMain.handle('generate', (_e, opts) => {

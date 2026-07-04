@@ -67,9 +67,14 @@ export function record(name, state) {
 export function lookup(name) { ensure(); return map.get(String(name).toLowerCase()) || null; }
 export function stats() {
   ensure();
-  let free = 0, taken = 0;
-  for (const v of map.values()) { if (v.state === 'free') free++; else if (v.state === 'taken') taken++; }
-  return { total: map.size, free, taken };
+  const now = Date.now(), DAY = 86400000;
+  let free = 0, taken = 0, free24 = 0, free7 = 0;
+  for (const v of map.values()) {
+    if (v.state === 'free') { free++; if (now - v.ts < DAY) free24++; if (now - v.ts < 7 * DAY) free7++; }
+    else if (v.state === 'taken') taken++;
+  }
+  const rate = map.size ? (free / map.size) * 100 : 0;
+  return { total: map.size, free, taken, free24, free7, rate };
 }
 export function searchFree(substr, limit = 300) {
   ensure();

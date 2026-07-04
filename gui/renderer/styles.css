@@ -150,6 +150,22 @@ textarea.tall { min-height: 120px; }
 .eta { color: var(--muted); font-size: 12px; margin-top: 4px; min-height: 14px; }
 .acct-row { margin-top: 6px; }
 
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: #0d1a10; border: 1px solid var(--green-dim); color: var(--green);
+  padding: 3px 9px; border-radius: 12px; font-size: 12px; cursor: pointer; user-select: none;
+}
+.chip:hover { background: #12341c; box-shadow: 0 0 8px rgba(57,255,20,.35); }
+.chip .tier { color: var(--amber); font-weight: 700; }
+.chip .x { color: var(--muted); cursor: pointer; }
+.chip .x:hover { color: var(--red); }
+
+.statsgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); gap: 6px; margin: 8px 0; }
+.statsgrid .cell { background: #0a0e14; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; text-align: center; }
+.statsgrid .cell b { display: block; color: var(--green); font-size: 15px; }
+.statsgrid .cell span { color: var(--muted); font-size: 11px; }
+
 .consolewrap { display: flex; flex-direction: column; }
 .console {
   background: #03050700;
