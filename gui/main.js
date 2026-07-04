@@ -32,7 +32,7 @@ import { snipe, requestStop } from '../src/sniper.js';
 import { bestOffset } from '../src/ntp.js';
 import { bulkCheck } from '../src/bulk.js';
 import { generateNames, spaceSize } from '../src/generate.js';
-import { makeProxyPool } from '../src/proxy.js';
+import { makeProxyPool, testProxies } from '../src/proxy.js';
 import { setManualToken, clearManualToken, manualStatus, getActiveToken, tryGetActiveToken } from './session.js';
 import { listAccounts, saveCurrentAsAccount, activateAccount, removeAccount, allTokens } from './accounts.js';
 import { initUpdater, checkForUpdates, applyUpdate } from './updater.js';
@@ -255,6 +255,15 @@ ipcMain.handle('fetch-proxies', async () => {
     } catch { /* source suivante */ }
   }
   return { ok: false, error: 'Aucune source de proxies joignable.' };
+});
+
+// Pré-teste des proxies et ne garde que les vivants (stream de progression).
+ipcMain.handle('test-proxies', async (_e, lines) => {
+  try {
+    const send = (ch, d) => { if (win && !win.isDestroyed()) win.webContents.send(ch, d); };
+    const r = await testProxies(lines || [], { onProgress: (p) => send('proxy-test-progress', p) });
+    return { ok: true, ...r };
+  } catch (e) { return { ok: false, error: e.message }; }
 });
 
 // --- Snipe ---

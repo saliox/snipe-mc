@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('api', {
   bulkCheck: (payload) => ipcRenderer.invoke('bulk-check', payload),
   bulkStop: () => ipcRenderer.invoke('bulk-stop'),
   fetchProxies: () => ipcRenderer.invoke('fetch-proxies'),
+  testProxies: (lines) => ipcRenderer.invoke('test-proxies', lines),
 
   snipe: (opts) => ipcRenderer.invoke('snipe', opts),
   stop: () => ipcRenderer.invoke('stop'),
@@ -39,4 +40,5 @@ contextBridge.exposeInMainWorld('api', {
   onUpdateProgress: (cb) => ipcRenderer.on('update-progress', (_e, data) => cb(data)),
   onBulkResult: (cb) => ipcRenderer.on('bulk-result', (_e, data) => cb(data)),
   onBulkStats: (cb) => ipcRenderer.on('bulk-stats', (_e, data) => cb(data)),
+  onProxyTestProgress: (cb) => ipcRenderer.on('proxy-test-progress', (_e, data) => cb(data)),
 });

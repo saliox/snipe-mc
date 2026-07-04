@@ -4,7 +4,9 @@ import { request } from 'undici';
 // API Mojang historique : 200 = pris (renvoie le profil), 404 = libre.
 // dispatcher optionnel : proxy undici pour répartir les requêtes.
 export async function isNameFree(name, dispatcher = null) {
-  const opts = { method: 'GET' };
+  // Timeouts courts : un proxy gratuit qui traîne échoue vite (au lieu des 300s
+  // par défaut) → il est retenté sur un autre proxy.
+  const opts = { method: 'GET', headersTimeout: 8000, bodyTimeout: 8000 };
   if (dispatcher) opts.dispatcher = dispatcher;
   const { statusCode, headers, body } = await request(
     `https://api.mojang.com/users/profiles/minecraft/${encodeURIComponent(name)}`,

@@ -1,6 +1,6 @@
 // Pool de proxies HTTP en rotation (round-robin) pour répartir les requêtes du
 // check en masse sur plusieurs IP et éviter le rate-limit de Mojang.
-import { ProxyAgent } from 'undici';
+import { ProxyAgent, request } from 'undici';
 
 // Accepte les formats :  http://user:pass@host:port  |  host:port  |  host:port:user:pass
 function normalize(raw) {
@@ -13,12 +13,59 @@ function normalize(raw) {
   return `http://${s}`;
 }
 
+// Pré-teste des proxies et ne renvoie que ceux qui répondent (via un endpoint
+// neutre, léger et rapide). onProgress({ done, total, alive }) pour l'UI.
+const TEST_URL = 'https://www.google.com/generate_204';
+export async function testProxies(lines, { timeoutMs = 5000, concurrency = 50, onProgress = () => {} } = {}) {
+  // Dédoublonne en gardant la ligne d'origine (format préservé pour l'UI).
+  const seen = new Set();
+  const list = [];
+  for (const raw of lines) {
+    const s = String(raw).trim();
+    if (!s || s.startsWith('#') || !normalize(s)) continue;
+    if (seen.has(s)) continue;
+    seen.add(s); list.push(s);
+  }
+  const alive = [];
+  let idx = 0, done = 0;
+
+  async function testOne(raw) {
+    const agent = new ProxyAgent({ uri: normalize(raw), connect: { timeout: timeoutMs } });
+    const probe = (async () => {
+      const { statusCode, body } = await request(TEST_URL, {
+        dispatcher: agent, method: 'GET', maxRedirections: 0,
+        headersTimeout: timeoutMs, bodyTimeout: timeoutMs,
+      });
+      await body.dump();
+      return statusCode >= 200 && statusCode < 400;
+    })();
+    // Cap DUR : le worker n'attend jamais plus de timeoutMs sur un proxy bloqué.
+    let ok = false;
+    try { ok = await Promise.race([probe, new Promise((r) => setTimeout(() => r('to'), timeoutMs))]); }
+    catch { ok = false; }
+    agent.destroy().catch(() => {}); // nettoyage en tâche de fond, non bloquant
+    return ok === true;
+  }
+
+  async function worker() {
+    while (idx < list.length) {
+      const raw = list[idx++];
+      if (await testOne(raw)) alive.push(raw);
+      onProgress({ done: ++done, total: list.length, alive: alive.length });
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, list.length || 1) }, worker));
+  return { alive, tested: list.length, aliveCount: alive.length };
+}
+
 export function makeProxyPool(lines = []) {
   const agents = [];
   for (const raw of lines) {
     const url = normalize(raw);
     if (!url) continue;
-    try { agents.push(new ProxyAgent(url)); } catch { /* proxy invalide ignoré */ }
+    // connect.timeout : abandonne vite un proxy injoignable (fail-fast, pas de blocage).
+    try { agents.push(new ProxyAgent({ uri: url, connect: { timeout: 8000 } })); }
+    catch { /* proxy invalide ignoré */ }
   }
   let i = 0;
   return {

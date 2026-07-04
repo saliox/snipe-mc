@@ -90,6 +90,8 @@ export async function bulkCheck(names, opts = {}) {
     try {
       let res;
       try {
+        // Sécurité : avec des proxies, un échec re-tente sur un AUTRE proxy — jamais
+        // en direct. Ton IP n'est donc jamais révélée à Mojang pendant un scan proxifié.
         res = await isNameFree(item.name, proxyPool ? proxyPool.next() : null);
       } catch (e) {
         if (item.attempts++ < MAX_ATTEMPTS) retryQ.push(item);

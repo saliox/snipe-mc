@@ -179,8 +179,24 @@ $('fetchProxyBtn').onclick = async () => {
   const merged = [...new Set([...proxiesArray(), ...r.proxies])];
   $('proxies').value = merged.join('\n');
   $('proxyCount').textContent = `${merged.length} proxies (gratuits)`;
-  cprint('info', `${r.proxies.length} proxies gratuits récupérés ⚠ lents/instables — le token reste en direct (jamais via proxy).`);
+  cprint('info', `${r.proxies.length} proxies gratuits récupérés — filtrage auto des morts…`);
+  await runProxyTest(); // ne garde que les vivants
 };
+
+$('testProxyBtn').onclick = () => runProxyTest();
+async function runProxyTest() {
+  const list = proxiesArray();
+  if (!list.length) { cprint('warn', 'Aucun proxy à tester.'); return; }
+  $('testProxyBtn').disabled = true; $('fetchProxyBtn').disabled = true;
+  cprint('step', `Test de ${list.length} proxies (garde les vivants)…`);
+  const r = await window.api.testProxies(list);
+  $('testProxyBtn').disabled = false; $('fetchProxyBtn').disabled = false;
+  if (!r.ok) { cprint('err', 'Test proxies: ' + r.error); return; }
+  $('proxies').value = r.alive.join('\n');
+  $('proxyCount').textContent = `${r.aliveCount}/${r.tested} vivants`;
+  cprint(r.aliveCount ? 'ok' : 'warn', `${r.aliveCount}/${r.tested} proxies vivants gardés (${r.tested - r.aliveCount} morts retirés).`);
+}
+window.api.onProxyTestProgress((p) => { $('proxyCount').textContent = `test ${p.done}/${p.total} · ${p.alive} vivants`; });
 
 // names = pseudos à traiter ce run (peut être un sous-ensemble en cas de reprise).
 // lastNames (la liste complète suivie) est géré par les appelants, PAS ici.
