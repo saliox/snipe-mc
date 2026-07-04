@@ -223,17 +223,27 @@ async function runBulk(names, { silent = false } = {}) {
 
 $('bulkBtn').onclick = () => {
   freeList = []; allResults = new Map(); tally = { free: 0, taken: 0, error: 0 };
+  resumeUnlimited = false;            // nouvelle session bulk (pas une reprise ∞)
   lastNames = bulkNamesArray();       // nouvelle liste complète suivie
   runBulk(lastNames);
 };
 $('bulkStopBtn').onclick = async () => { await window.api.bulkStop(); cprint('warn', 'Arrêt demandé…'); $('resumeBtn').classList.remove('hidden'); };
+let resumeUnlimited = false; // la dernière session rechargée était un scan illimité
 $('resumeBtn').onclick = () => {
-  // Recharge visuellement la liste complète + le bon compteur.
+  $('resumeBtn').classList.add('hidden');
+  // Reprise d'un scan ILLIMITÉ : on relance en conservant les résultats accumulés
+  // (le dédoublonnage évite de re-checker ce qui l'a déjà été).
+  if (resumeUnlimited) {
+    resumeUnlimited = false;
+    cprint('step', `Reprise du scan illimité (${allResults.size} déjà checkés conservés)…`);
+    startUnlimited(false);
+    return;
+  }
+  // Reprise d'un BULK : ne traite que les pseudos restants.
   $('bulkNames').value = lastNames.join('\n');
   updateBulkCount();
   const remaining = lastNames.filter((n) => !allResults.has(n.toLowerCase()));
-  if (!remaining.length) { cprint('info', 'Rien à reprendre (tout est déjà checké).'); $('resumeBtn').classList.add('hidden'); return; }
-  $('resumeBtn').classList.add('hidden');
+  if (!remaining.length) { cprint('info', 'Rien à reprendre (tout est déjà checké).'); return; }
   cprint('step', `Reprise : ${remaining.length} restants sur ${lastNames.length}`);
   runBulk(remaining);
 };
@@ -336,12 +346,29 @@ async function loadCheckpoint() {
   try {
     const r = await window.api.checkpointLoad();
     const d = r && r.ok ? r.data : null;
-    if (!d || !Array.isArray(d.names) || !d.names.length) return;
-    lastNames = d.names;
+    if (!d) return;
     allResults = new Map((d.results || []).map((v) => [v.name.toLowerCase(), v]));
     freeList = (d.results || []).filter((v) => v.state === 'free').map((v) => v.name);
     if (d.tally) tally = { free: d.tally.free || 0, taken: d.tally.taken || 0, error: d.tally.error || 0 };
-    // Recharge TOUJOURS la liste de la dernière session à l'écran.
+
+    // Dernière session = SCAN ILLIMITÉ -> propose de reprendre (résultats conservés).
+    if (d.unlimited) {
+      const o = d.genOpts || {};
+      if (o.mode) { $('genMode').value = o.mode; syncGenMode(); }
+      if (o.length) $('genLen').value = o.length;
+      if (o.charset) $('genCharset').value = o.charset;
+      if (o.pattern != null) $('genPattern').value = o.pattern;
+      if (o.filters) { $('filterOg').checked = !!o.filters.og; $('filterNoRepeat').checked = !!o.filters.noRepeat; }
+      $('unlimitedInfo').innerHTML = `∞ ${allResults.size} checkés · <span class="free">${tally.free} libres</span> (session précédente)`;
+      resumeUnlimited = true;
+      $('resumeBtn').classList.remove('hidden');
+      cprint('info', `Scan illimité précédent rechargé : ${allResults.size} checkés, ${freeList.length} libres — REPRENDRE pour continuer.`);
+      return;
+    }
+
+    // Sinon : BULK CHECK.
+    if (!Array.isArray(d.names) || !d.names.length) return;
+    lastNames = d.names;
     $('bulkNames').value = lastNames.join('\n');
     updateBulkCount();
     const remaining = lastNames.filter((n) => !allResults.has(n.toLowerCase()));
@@ -387,16 +414,31 @@ function updateUniInfo() {
   $('unlimitedInfo').innerHTML = html;
   $('bulkEta').innerHTML = html; // même info cumulée dans le module BULK
 }
+// Checkpoint du scan illimité (débouncé) : conserve résultats + réglages pour reprise.
+let uniCkptTimer = null;
+function saveUnlimitedCheckpoint() {
+  if (uniCkptTimer) return;
+  uniCkptTimer = setTimeout(() => {
+    uniCkptTimer = null;
+    window.api.checkpointSave({ unlimited: true, genOpts: currentGenOpts(300), results: [...allResults.values()], tally, ts: Date.now() });
+  }, 5000);
+}
+function saveUnlimitedCheckpointNow() {
+  if (uniCkptTimer) { clearTimeout(uniCkptTimer); uniCkptTimer = null; }
+  return window.api.checkpointSave({ unlimited: true, genOpts: currentGenOpts(300), results: [...allResults.values()], tally, ts: Date.now() });
+}
 $('genUnlimitedStopBtn').onclick = () => { unlimited = false; window.api.bulkStop(); cprint('warn', 'Arrêt du scan illimité…'); };
-$('genUnlimitedBtn').onclick = async () => {
+$('genUnlimitedBtn').onclick = () => startUnlimited(true);
+async function startUnlimited(fresh) {
   if (unlimited) return;
   unlimited = true;
   unlimitedThreshold = Number($('unlimitedThreshold').value) || 0;
-  freeList = []; allResults = new Map(); lastNames = []; tally = { free: 0, taken: 0, error: 0 };
+  if (fresh) { freeList = []; allResults = new Map(); tally = { free: 0, taken: 0, error: 0 }; }
+  lastNames = [];
   uniStart = Date.now();
   setUnlimitedRunning(true);
   $('bulkProgress').classList.remove('hidden');
-  cprint('step', `SCAN ILLIMITÉ (${$('genMode').value})${unlimitedThreshold ? ` · stop à ${unlimitedThreshold} libres` : ' · stop manuel'}`);
+  cprint('step', `SCAN ILLIMITÉ (${$('genMode').value})${fresh ? '' : ' · reprise'}${unlimitedThreshold ? ` · stop à ${unlimitedThreshold} libres` : ' · stop manuel'}`);
   clearInterval(uniTimer); uniTimer = setInterval(updateUniInfo, 500);
 
   let emptyStreak = 0;
@@ -410,6 +452,7 @@ $('genUnlimitedBtn').onclick = async () => {
     }
     emptyStreak = 0;
     await runBulk(names, { silent: true });
+    saveUnlimitedCheckpoint(); // persiste la progression (reprise possible)
     if (!unlimited) break; // stoppé (manuel ou seuil) pendant le batch
     if (unlimitedThreshold && freeList.length >= unlimitedThreshold) { cprint('ok', `Seuil de ${unlimitedThreshold} libres atteint.`); break; }
     // Garde-fou mémoire : le scan illimité retient tout (dédup + CSV).
@@ -417,6 +460,7 @@ $('genUnlimitedBtn').onclick = async () => {
   }
   unlimited = false;
   clearInterval(uniTimer); uniTimer = null;
+  await saveUnlimitedCheckpointNow(); // état final persistant pour reprise
   $('unlimitedInfo').innerHTML = uniLine(); // résumé final (cumulé)
   setUnlimitedRunning(false);
   $('bulkEta').textContent = '';
