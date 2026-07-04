@@ -52,6 +52,8 @@ async function refreshAccount() {
     const src = r.source === 'token' ? 'token' : 'MS';
     line.innerHTML = `whoami :: <span class="free">${esc(r.profile.name)}</span> <span class="muted">[${src}]</span>`;
     $('tokenStatus').innerHTML = `<span class="ok">✔ ${esc(r.profile.name)}</span>`;
+    // Remplit auto la date du dernier changement (sans écraser une saisie manuelle).
+    if (!$('dropLastChange').value) autoFillDropDate({ silent: true }).catch(() => {});
   } else {
     line.innerHTML = 'whoami :: <span class="muted">non connecté</span>';
   }
@@ -751,17 +753,40 @@ $('cooldownBtn').onclick = async () => {
 };
 
 // ----- Planification du drop (#4) -----
-$('dropCalcBtn').onclick = () => {
-  const v = $('dropLastChange').value;
-  if (!v) { $('dropInfo').textContent = 'indique la date du dernier changement'; return; }
-  const drop = new Date(new Date(v).getTime() + 37 * 86400000);
-  // remplit le champ « planifié » (datetime-local, heure locale).
+// Applique un drop (+37 j) à partir d'une date de dernier changement (ms epoch)
+// et bascule le snipe en mode « planifié ».
+function applyDrop(baseMs, note) {
+  const drop = new Date(baseMs + 37 * 86400000);
   const p = (n) => String(n).padStart(2, '0');
   $('snipeAt').value = `${drop.getFullYear()}-${p(drop.getMonth() + 1)}-${p(drop.getDate())}T${p(drop.getHours())}:${p(drop.getMinutes())}:00`;
   document.querySelector('input[name="smode"][value="at"]').checked = true;
   $('snipeAt').disabled = false; $('snipeIn').disabled = true;
   const soon = drop.getTime() - Date.now();
-  $('dropInfo').innerHTML = `drop ≈ <span class="free">${drop.toLocaleString('fr-FR')}</span> (${soon > 0 ? 'dans ' + fmtDur(soon) : 'déjà passé'}) → mode planifié réglé`;
+  $('dropInfo').innerHTML = `${note ? note + ' — ' : ''}drop ≈ <span class="free">${drop.toLocaleString('fr-FR')}</span> (${soon > 0 ? 'dans ' + fmtDur(soon) : 'déjà passé'}) → mode planifié réglé`;
+}
+
+// Récupère la date du dernier changement depuis le compte connecté (token/MS).
+// compute=true → calcule aussi le drop ; silent=true → ne rien afficher en cas d'échec.
+async function autoFillDropDate({ compute = false, silent = false } = {}) {
+  const r = await window.api.nameChangeInfo();
+  if (!r || !r.ok) { if (!silent) $('dropInfo').innerHTML = `<span class="bad">${esc((r && r.error) || 'connecte un compte d’abord')}</span>`; return null; }
+  if (!r.changedAt) { if (!silent) $('dropInfo').innerHTML = '<span class="muted">ce compte n’a jamais changé de pseudo — aucune date à récupérer</span>'; return null; }
+  const d = new Date(r.changedAt);
+  const p = (n) => String(n).padStart(2, '0');
+  $('dropLastChange').value = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  if (compute) applyDrop(r.changedAt, `dernier changement le ${d.toLocaleDateString('fr-FR')}`);
+  return r.changedAt;
+}
+
+$('dropAutoBtn').onclick = async () => {
+  $('dropInfo').textContent = 'lecture du compte…';
+  await autoFillDropDate({ compute: true });
+};
+
+$('dropCalcBtn').onclick = () => {
+  const v = $('dropLastChange').value;
+  if (!v) { $('dropInfo').textContent = 'indique la date du dernier changement (ou clique « auto (compte) »)'; return; }
+  applyDrop(new Date(v).getTime());
 };
 
 // ----- Export / import config (#7) -----
