@@ -1,17 +1,22 @@
 // Cœur de l'auto-update, sans dépendance à Electron (donc testable en Node pur).
-// Le flux de mise à jour est un simple dossier HTTP hébergé sur un autre PC :
-//   <feed>/latest.json          -> { version, file, sha256, size, notes }
-//   <feed>/Snipe MC Setup X.Y.Z.exe
+//
+// Deux sources possibles :
+//  - GitHub Releases (défaut, autonome) : le dépôt public sert de flux, aucune
+//    config ni serveur requis.
+//  - Flux HTTP générique (dev/LAN) : un dossier servi contenant latest.json
+//    + l'installeur (voir scripts/serve-updates.mjs).
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { request } from 'undici';
 
+const UA = 'snipe-mc-updater';
+
 // Compare deux versions "x.y.z". Renvoie true si `a` est strictement plus récente que `b`.
 export function isNewer(a, b) {
-  const pa = String(a).split('.').map((n) => parseInt(n, 10) || 0);
-  const pb = String(b).split('.').map((n) => parseInt(n, 10) || 0);
+  const pa = String(a).replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b).replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
     const da = pa[i] || 0, db = pb[i] || 0;
     if (da > db) return true;
@@ -20,25 +25,43 @@ export function isNewer(a, b) {
   return false;
 }
 
-// Récupère et valide latest.json depuis le flux.
-export async function fetchLatest(feedBase) {
-  const url = new URL('latest.json', ensureSlash(feedBase)).toString();
+// --- Source GitHub Releases ---
+// repo = "owner/name". Renvoie { version, url, file, size, sha256, notes }.
+export async function fetchLatestGithub(repo) {
+  const url = `https://api.github.com/repos/${repo}/releases/latest`;
   const { statusCode, body } = await request(url, {
-    method: 'GET',
-    headersTimeout: 5000,
-    bodyTimeout: 8000,
+    headers: { 'user-agent': UA, accept: 'application/vnd.github+json' },
+    maxRedirections: 3, headersTimeout: 6000, bodyTimeout: 10000,
   });
+  if (statusCode !== 200) { await body.dump(); throw new Error(`GitHub API HTTP ${statusCode}`); }
+  const rel = await body.json();
+  const version = String(rel.tag_name || '').replace(/^v/i, '');
+  const asset = (rel.assets || []).find((a) => /\.exe$/i.test(a.name)) || (rel.assets || [])[0];
+  if (!version || !asset) throw new Error('Release GitHub sans installeur .exe');
+  let sha256 = null;
+  if (asset.digest && asset.digest.startsWith('sha256:')) sha256 = asset.digest.slice(7);
+  return { version, url: asset.browser_download_url, file: asset.name, size: asset.size, sha256, notes: rel.body || '' };
+}
+
+// --- Source HTTP générique (latest.json) ---
+export async function fetchLatest(feedBase) {
+  const base = ensureSlash(feedBase);
+  const url = new URL('latest.json', base).toString();
+  const { statusCode, body } = await request(url, { method: 'GET', headersTimeout: 5000, bodyTimeout: 8000 });
   if (statusCode !== 200) { await body.dump(); throw new Error(`latest.json HTTP ${statusCode}`); }
   const info = await body.json();
   if (!info || !info.version || !info.file) throw new Error('latest.json invalide (version/file manquants)');
+  info.url = new URL(encodeURIComponent(info.file), base).toString();
   return info;
 }
 
-// Télécharge l'installeur dans `dest`, vérifie le SHA-256, renvoie `dest`.
+// Télécharge info.url dans `dest`, vérifie le SHA-256 si connu, renvoie `dest`.
 // onProgress({ received, total, pct }) est appelé pendant le téléchargement.
-export async function downloadTo(feedBase, info, dest, onProgress) {
-  const url = new URL(encodeURIComponent(info.file), ensureSlash(feedBase)).toString();
-  const { statusCode, headers, body } = await request(url, { maxRedirections: 2 });
+export async function downloadTo(info, dest, onProgress) {
+  const { statusCode, headers, body } = await request(info.url, {
+    maxRedirections: 5,
+    headers: { 'user-agent': UA },
+  });
   if (statusCode !== 200) { await body.dump(); throw new Error(`téléchargement HTTP ${statusCode}`); }
 
   const total = Number(info.size) || Number(headers['content-length']) || 0;

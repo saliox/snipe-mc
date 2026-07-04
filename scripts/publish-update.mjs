@@ -47,8 +47,25 @@ const latest = {
 };
 fs.writeFileSync(path.join(releaseDir, 'latest.json'), JSON.stringify(latest, null, 2));
 
-console.log('Mise à jour publiée dans release/ :');
-console.log(`  version : ${version}`);
-console.log(`  fichier : ${installerName} (${(size / 1e6).toFixed(1)} Mo)`);
-console.log(`  sha256  : ${sha256}`);
-console.log('\nProchaine étape (sur le PC hébergeur) :  npm run serve:updates');
+console.log('Feed local prêt dans release/ :');
+console.log(`  version : ${version}  |  ${(size / 1e6).toFixed(1)} Mo  |  sha256 ${sha256.slice(0, 12)}…`);
+
+// 4. Publication GitHub Releases (canal d'auto-update autonome).
+//    Nécessite gh authentifié. Si la release existe déjà, on remplace l'asset.
+const tag = `v${version}`;
+console.log(`\nPublication GitHub (${tag})...`);
+const exists = spawnSync('gh', ['release', 'view', tag], { stdio: 'ignore' }).status === 0;
+let gh;
+if (exists) {
+  console.log('  release existante → remplacement de l\'asset');
+  gh = spawnSync('gh', ['release', 'upload', tag, installerPath, '--clobber'], { stdio: 'inherit' });
+} else {
+  gh = spawnSync('gh', ['release', 'create', tag, installerPath,
+    '--title', `Snipe MC ${version}`, '--notes', notes || `Snipe MC ${version}`], { stdio: 'inherit' });
+}
+if (gh.status !== 0) {
+  console.error('\n⚠ Publication GitHub échouée (gh non authentifié ?). Le feed local reste utilisable.');
+  process.exit(1);
+}
+console.log(`\n✓ Publié : https://github.com/saliox/snipe-mc/releases/tag/${tag}`);
+console.log('  Les apps installées le récupéreront automatiquement au prochain lancement.');

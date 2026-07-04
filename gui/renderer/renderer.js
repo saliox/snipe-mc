@@ -161,14 +161,28 @@ $('bulkBtn').onclick = async () => {
   const s = r.summary;
   cprint('ok', `Terminé — libres:${s.free} pris:${s.taken} invalides:${s.invalid} erreurs:${s.errors}`);
   $('bulkStats').innerHTML = `<span class="ok">${s.free} libres</span> · ${s.taken} pris · ${s.invalid} inval. · ${s.errors} err.`;
+  // Propose automatiquement le .txt des pseudos non pris à la fin du check.
+  await exportFree({ auto: true });
 };
 $('bulkStopBtn').onclick = async () => { await window.api.bulkStop(); cprint('warn', 'Arrêt demandé…'); };
 
-$('exportFreeBtn').onclick = async () => {
-  if (!freeList.length) { cprint('warn', 'Aucun pseudo libre à exporter.'); return; }
-  const r = await window.api.saveTxt({ suggested: 'pseudos-libres.txt', content: freeList.join('\n') });
+$('exportFreeBtn').onclick = () => exportFree({ auto: false });
+
+async function exportFree({ auto } = {}) {
+  if (!freeList.length) {
+    if (!auto) cprint('warn', 'Aucun pseudo libre à exporter.');
+    else cprint('info', 'Aucun pseudo libre trouvé — pas de fichier à proposer.');
+    return;
+  }
+  const stamp = new Date().toISOString().slice(0, 10);
+  const r = await window.api.saveTxt({
+    suggested: `pseudos-libres-${freeList.length}-${stamp}.txt`,
+    content: freeList.join('\n') + '\n',
+  });
+  if (r.canceled) { cprint('info', `Enregistrement annulé (${freeList.length} pseudos libres gardés — bouton "export free" dispo).`); return; }
   if (r.ok) cprint('ok', `${freeList.length} pseudos libres → ${r.path}`);
-};
+  else cprint('err', 'Export: ' + (r.error || 'échec'));
+}
 
 window.api.onBulkResult((r) => {
   const map = { free: 'free', taken: 'taken', invalid: 'invalid', error: 'err' };

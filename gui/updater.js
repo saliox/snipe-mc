@@ -1,23 +1,30 @@
 // Auto-update côté Electron (processus principal). S'appuie sur src/updatecore.js
 // pour la logique réseau, et pilote l'UI + le lancement de l'installeur.
 //
-// Flux hébergé sur un autre PC, adresse dans UPDATE_URL (.env), ex :
-//   UPDATE_URL=http://192.168.1.50:8770/
+// AUTONOME par défaut : se met à jour depuis les Releases GitHub du dépôt public
+// DEFAULT_REPO, sans aucune config ni serveur. Overrides possibles via .env :
+//   UPDATE_REPO=owner/name        (autre dépôt GitHub)
+//   UPDATE_URL=http://ip:8770/    (flux HTTP local, voir scripts/serve-updates.mjs)
 import { app } from 'electron';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { isNewer, fetchLatest, downloadTo } from '../src/updatecore.js';
+import { isNewer, fetchLatest, fetchLatestGithub, downloadTo } from '../src/updatecore.js';
+
+const DEFAULT_REPO = 'saliox/snipe-mc';
 
 let getWin = () => null;
-let feedBase = null;
+let source = { kind: 'github', repo: DEFAULT_REPO }; // ou { kind:'http', base }
 let lastInfo = null;
 let busy = false;
 
 export function initUpdater(winGetter) {
   getWin = winGetter;
-  feedBase = process.env.UPDATE_URL ? process.env.UPDATE_URL.trim() : null;
+  const feedUrl = process.env.UPDATE_URL && process.env.UPDATE_URL.trim();
+  const repo = (process.env.UPDATE_REPO && process.env.UPDATE_REPO.trim()) || DEFAULT_REPO;
+  source = feedUrl ? { kind: 'http', base: feedUrl } : { kind: 'github', repo };
+  console.log(`[update] source: ${source.kind === 'http' ? source.base : 'github:' + source.repo}`);
 }
 
 function send(channel, data) {
@@ -29,13 +36,10 @@ function send(channel, data) {
 // "à jour"/"désactivé"/"erreur" (bouton manuel) ; silent=true -> on ne
 // remonte que si une MAJ est disponible (vérif de démarrage).
 export async function checkForUpdates({ silent = true } = {}) {
-  if (!feedBase) {
-    console.log('[update] désactivé (UPDATE_URL non défini)');
-    if (!silent) send('update-status', { state: 'disabled' });
-    return { available: false, disabled: true };
-  }
   try {
-    const info = await fetchLatest(feedBase);
+    const info = source.kind === 'http'
+      ? await fetchLatest(source.base)
+      : await fetchLatestGithub(source.repo);
     const current = app.getVersion();
     const available = isNewer(info.version, current);
     lastInfo = info;
@@ -53,12 +57,12 @@ export async function checkForUpdates({ silent = true } = {}) {
 // Télécharge la MAJ connue puis lance l'installeur et redémarre l'app.
 export async function applyUpdate() {
   if (busy) return { ok: false, error: 'Mise à jour déjà en cours' };
-  if (!feedBase || !lastInfo) return { ok: false, error: 'Aucune mise à jour prête' };
+  if (!lastInfo) return { ok: false, error: 'Aucune mise à jour prête' };
   busy = true;
   try {
     const dest = path.join(os.tmpdir(), sanitize(lastInfo.file));
     send('update-status', { state: 'downloading' });
-    await downloadTo(feedBase, lastInfo, dest, (p) => send('update-progress', p));
+    await downloadTo(lastInfo, dest, (p) => send('update-progress', p));
     send('update-status', { state: 'installing' });
     quitAndInstall(dest);
     return { ok: true };
