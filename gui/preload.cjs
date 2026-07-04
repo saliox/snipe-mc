@@ -24,6 +24,12 @@ contextBridge.exposeInMainWorld('api', {
   ntp: () => ipcRenderer.invoke('ntp'),
 
   generate: (opts) => ipcRenderer.invoke('generate', opts),
+  rankNames: (names) => ipcRenderer.invoke('rank-names', names),
+  historyStats: () => ipcRenderer.invoke('history-stats'),
+  historyLookup: (name) => ipcRenderer.invoke('history-lookup', name),
+  historySearch: (q) => ipcRenderer.invoke('history-search', q),
+  historyFreeAll: () => ipcRenderer.invoke('history-free-all'),
+  historyClear: () => ipcRenderer.invoke('history-clear'),
   pickTxt: () => ipcRenderer.invoke('pick-txt'),
   saveTxt: (payload) => ipcRenderer.invoke('save-txt', payload),
   bulkCheck: (payload) => ipcRenderer.invoke('bulk-check', payload),

@@ -63,7 +63,9 @@ export async function testProxies(lines, { timeoutMs = 5000, concurrency = 50, o
 }
 
 export function makeProxyPool(lines = []) {
+  const MAX_FAILS = 3; // échecs consécutifs avant éjection d'un proxy
   const agents = [];
+  const fails = new Map(); // agent -> échecs consécutifs
   for (const raw of lines) {
     const url = normalize(raw);
     if (!url) continue;
@@ -72,9 +74,20 @@ export function makeProxyPool(lines = []) {
     catch { /* proxy invalide ignoré */ }
   }
   let i = 0;
+  const live = () => agents.filter((a) => (fails.get(a) || 0) < MAX_FAILS);
   return {
     size: agents.length,
-    next() { return agents.length ? agents[i++ % agents.length] : null; },
+    aliveCount() { return live().length; },
+    // Round-robin sur les vivants. Si TOUS sont éjectés, on continue sur tous
+    // (jamais null) : mieux vaut échouer via proxy que basculer en direct (leak IP).
+    next() {
+      if (!agents.length) return null;
+      const pool = live();
+      const arr = pool.length ? pool : agents;
+      return arr[i++ % arr.length];
+    },
+    penalize(a) { if (a) fails.set(a, (fails.get(a) || 0) + 1); }, // échec réseau
+    reward(a) { if (a && fails.get(a)) fails.set(a, 0); },          // a répondu
     async close() { for (const a of agents) { try { await a.close(); } catch {} } },
   };
 }

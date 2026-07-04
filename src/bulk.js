@@ -75,6 +75,8 @@ export async function bulkCheck(names, opts = {}) {
       free, taken, errors,
       inFlight, intervalMs: Math.round(interval),
       throttled: Date.now() < pauseUntil, throttleEvents,
+      proxiesAlive: proxyPool ? proxyPool.aliveCount() : null,
+      proxiesTotal: proxyPool ? proxyPool.size : null,
     });
   }
 
@@ -96,11 +98,14 @@ export async function bulkCheck(names, opts = {}) {
     inFlight++;
     try {
       let res;
+      const agent = proxyPool ? proxyPool.next() : null;
       try {
         // Sécurité : avec des proxies, un échec re-tente sur un AUTRE proxy — jamais
         // en direct. Ton IP n'est donc jamais révélée à Mojang pendant un scan proxifié.
-        res = await isNameFree(item.name, proxyPool ? proxyPool.next() : null);
+        res = await isNameFree(item.name, agent);
+        if (proxyPool) proxyPool.reward(agent); // ce proxy a répondu
       } catch (e) {
+        if (proxyPool) proxyPool.penalize(agent); // proxy mort -> vers l'éjection
         if (item.attempts++ < MAX_ATTEMPTS) retryQ.push(item);
         else { errors++; checked++; onResult({ done: checked, total, name: item.name, state: 'error', detail: e.message }); }
         return;

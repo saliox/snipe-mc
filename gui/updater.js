@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { isNewer, fetchLatest, fetchLatestGithub, downloadTo } from '../src/updatecore.js';
+import { isNewer, fetchLatest, fetchLatestGithub, downloadTo, fetchJson } from '../src/updatecore.js';
 
 const DEFAULT_REPO = 'saliox/snipe-mc';
 
@@ -54,12 +54,16 @@ export async function checkForUpdates({ silent = true } = {}) {
   }
 }
 
-// Télécharge la MAJ connue puis lance l'installeur et redémarre l'app.
+// Télécharge la MAJ puis l'installe. Essaie d'abord la MAJ DIFFÉRENTIELLE
+// (app.zip ~1 Mo, si le runtime Electron est inchangé), sinon l'installeur complet.
 export async function applyUpdate() {
   if (busy) return { ok: false, error: 'Mise à jour déjà en cours' };
   if (!lastInfo) return { ok: false, error: 'Aucune mise à jour prête' };
   busy = true;
   try {
+    if (await tryAppOnlyUpdate()) return { ok: true };
+
+    // Repli : installeur complet.
     const dest = path.join(os.tmpdir(), sanitize(lastInfo.file));
     send('update-status', { state: 'downloading' });
     await downloadTo(lastInfo, dest, (p) => send('update-progress', p));
@@ -71,6 +75,53 @@ export async function applyUpdate() {
     send('update-status', { state: 'error', error: e.message });
     return { ok: false, error: e.message };
   }
+}
+
+// MAJ différentielle : ne remplace que resources/app (code), ~1 Mo au lieu de 81 Mo.
+// Conditions : assets app.zip + app-update.json présents et MÊME version majeure
+// d'Electron (pas de changement de runtime). Renvoie true si appliquée.
+async function tryAppOnlyUpdate() {
+  try {
+    const assets = lastInfo.assets || [];
+    const metaAsset = assets.find((a) => a.name === 'app-update.json');
+    const zipAsset = assets.find((a) => a.name === 'app.zip');
+    if (!metaAsset || !zipAsset) return false;
+
+    const meta = await fetchJson(metaAsset.url);
+    const curMajor = String(process.versions.electron || '').split('.')[0];
+    const newMajor = String(meta.electron || '').split('.')[0];
+    if (!curMajor || curMajor !== newMajor) {
+      console.log(`[update] runtime Electron différent (${curMajor}->${newMajor}) : installeur complet`);
+      return false;
+    }
+
+    const dest = path.join(os.tmpdir(), 'snipemc-app.zip');
+    send('update-status', { state: 'downloading' });
+    await downloadTo({ url: zipAsset.url, size: meta.size, sha256: meta.sha256 || zipAsset.sha256 }, dest, (p) => send('update-progress', p));
+    send('update-status', { state: 'installing' });
+    applyAppZip(dest);
+    return true;
+  } catch (e) {
+    console.log('[update] MAJ différentielle impossible, repli installeur :', e.message);
+    return false;
+  }
+}
+
+// Remplace resources/app par le contenu de app.zip (racine = dossier app/) via un
+// script PowerShell détaché, puis relance l'app.
+function applyAppZip(zipPath) {
+  const exe = process.execPath;
+  const resourcesDir = process.resourcesPath; // <install>\resources
+  const ps = path.join(os.tmpdir(), 'snipemc-appupdate.ps1');
+  const script =
+    "$ErrorActionPreference='SilentlyContinue'\r\n" +
+    'Start-Sleep -Seconds 1\r\n' +
+    `Expand-Archive -Path '${zipPath}' -DestinationPath '${resourcesDir}' -Force\r\n` +
+    `Start-Process -FilePath '${exe}'\r\n`;
+  fs.writeFileSync(ps, script);
+  const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps], { detached: true, stdio: 'ignore', windowsHide: true });
+  child.unref();
+  setTimeout(() => app.quit(), 400);
 }
 
 // Lance l'installeur en silencieux via un script détaché qui attend la fin de

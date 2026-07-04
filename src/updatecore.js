@@ -26,7 +26,7 @@ export function isNewer(a, b) {
 }
 
 // --- Source GitHub Releases ---
-// repo = "owner/name". Renvoie { version, url, file, size, sha256, notes }.
+// repo = "owner/name". Renvoie { version, url, file, size, sha256, notes, assets }.
 export async function fetchLatestGithub(repo) {
   const url = `https://api.github.com/repos/${repo}/releases/latest`;
   const { statusCode, body } = await request(url, {
@@ -36,11 +36,20 @@ export async function fetchLatestGithub(repo) {
   if (statusCode !== 200) { await body.dump(); throw new Error(`GitHub API HTTP ${statusCode}`); }
   const rel = await body.json();
   const version = String(rel.tag_name || '').replace(/^v/i, '');
-  const asset = (rel.assets || []).find((a) => /\.exe$/i.test(a.name)) || (rel.assets || [])[0];
+  const assets = (rel.assets || []).map((a) => ({
+    name: a.name, url: a.browser_download_url, size: a.size,
+    sha256: (a.digest && a.digest.startsWith('sha256:')) ? a.digest.slice(7) : null,
+  }));
+  const asset = assets.find((a) => /\.exe$/i.test(a.name)) || assets[0];
   if (!version || !asset) throw new Error('Release GitHub sans installeur .exe');
-  let sha256 = null;
-  if (asset.digest && asset.digest.startsWith('sha256:')) sha256 = asset.digest.slice(7);
-  return { version, url: asset.browser_download_url, file: asset.name, size: asset.size, sha256, notes: rel.body || '' };
+  return { version, url: asset.url, file: asset.name, size: asset.size, sha256: asset.sha256, notes: rel.body || '', assets };
+}
+
+// Télécharge et parse un petit asset JSON (métadonnées de MAJ différentielle).
+export async function fetchJson(url) {
+  const { statusCode, body } = await request(url, { headers: { 'user-agent': UA }, maxRedirections: 3, headersTimeout: 5000, bodyTimeout: 8000 });
+  if (statusCode !== 200) { await body.dump(); throw new Error(`JSON HTTP ${statusCode}`); }
+  return body.json();
 }
 
 // --- Source HTTP générique (latest.json) ---

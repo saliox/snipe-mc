@@ -32,9 +32,11 @@ import { snipe, requestStop } from '../src/sniper.js';
 import { bestOffset } from '../src/ntp.js';
 import { bulkCheck } from '../src/bulk.js';
 import { generateNames, spaceSize } from '../src/generate.js';
+import { rankNames } from '../src/score.js';
 import { makeProxyPool, testProxies } from '../src/proxy.js';
 import { setManualToken, clearManualToken, manualStatus, getActiveToken, tryGetActiveToken } from './session.js';
 import { listAccounts, saveCurrentAsAccount, activateAccount, removeAccount, allTokens } from './accounts.js';
+import * as history from './history.js';
 import { initUpdater, checkForUpdates, applyUpdate } from './updater.js';
 
 let win;
@@ -116,6 +118,7 @@ app.on('web-contents-created', (_e, contents) => {
 });
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+app.on('before-quit', () => { try { history.flushNow(); } catch { /* ignore */ } });
 
 // --- Meta / MAJ ---
 ipcMain.handle('config-status', () => ({
@@ -183,6 +186,12 @@ ipcMain.handle('namechange-info', async () => {
   } catch (e) { return { ok: false, error: e.message }; }
 });
 
+// Classe des pseudos par score de désirabilité.
+ipcMain.handle('rank-names', (_e, names) => {
+  try { return { ok: true, ranked: rankNames(Array.isArray(names) ? names : []) }; }
+  catch (e) { return { ok: false, error: e.message }; }
+});
+
 // --- NTP / check unitaire ---
 ipcMain.handle('ntp', async () => {
   try { return { ok: true, ...(await bestOffset()) }; }
@@ -192,7 +201,10 @@ ipcMain.handle('ntp', async () => {
 ipcMain.handle('check', async (_e, name) => {
   try {
     const out = { ok: true, name, valid: validName(name) };
+    out.seen = history.lookup(name); // « déjà vu » = état PRÉCÉDENT (avant ce check)
     out.public = await isNameFree(name);
+    if (out.public.free === true) history.record(name, 'free');
+    else if (out.public.free === false) history.record(name, 'taken');
     const active = await tryGetActiveToken();
     if (active) {
       try { out.account = await nameStatus(name, active.accessToken); }
@@ -201,6 +213,13 @@ ipcMain.handle('check', async (_e, name) => {
     return out;
   } catch (e) { return { ok: false, error: e.message }; }
 });
+
+// --- Historique persistant ---
+ipcMain.handle('history-stats', () => { try { return { ok: true, ...history.stats() }; } catch (e) { return { ok: false, error: e.message }; } });
+ipcMain.handle('history-lookup', (_e, name) => { try { return { ok: true, entry: history.lookup(name) }; } catch (e) { return { ok: false, error: e.message }; } });
+ipcMain.handle('history-search', (_e, q) => { try { return { ok: true, names: history.searchFree(q) }; } catch (e) { return { ok: false, error: e.message }; } });
+ipcMain.handle('history-free-all', () => { try { return { ok: true, names: history.allFree() }; } catch (e) { return { ok: false, error: e.message }; } });
+ipcMain.handle('history-clear', () => { try { history.clear(); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; } });
 
 // --- Générateur ---
 ipcMain.handle('generate', (_e, opts) => {
@@ -247,10 +266,11 @@ ipcMain.handle('bulk-check', async (_e, { names, delayMs, useToken, proxies }) =
     const summary = await bulkCheck(names, {
       minIntervalMs: Number(delayMs) || 0,
       token, proxyPool,
-      onResult: (r) => send('bulk-result', r),
+      onResult: (r) => { history.record(r.name, r.state); send('bulk-result', r); },
       onStats: (s) => send('bulk-stats', s),
       shouldStop: () => bulkStop,
     });
+    history.flushNow();
     if (proxyPool) summary.proxies = proxyPool.size;
     return { ok: true, summary };
   } catch (e) { return { ok: false, error: e.message }; }

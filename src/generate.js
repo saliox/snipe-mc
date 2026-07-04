@@ -169,3 +169,7 @@ export function spaceSize(length, charset = 'alpha') {
   const chars = SETS[charset] || SETS.alpha;
   return Math.pow(chars.length, Math.max(3, Math.min(16, length | 0)));
 }
+
+// Le dictionnaire embarqué sert aussi au score de désirabilité.
+const DICT_SET = new Set(DICT);
+export function isDictWord(s) { return DICT_SET.has(String(s).toLowerCase()); }

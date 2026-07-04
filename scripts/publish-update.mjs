@@ -67,5 +67,30 @@ if (gh.status !== 0) {
   console.error('\n⚠ Publication GitHub échouée (gh non authentifié ?). Le feed local reste utilisable.');
   process.exit(1);
 }
+
+// 5. MAJ différentielle : app.zip (juste resources/app) + app-update.json.
+//    Permet aux clients de ne télécharger ~1 Mo au lieu de l'installeur complet
+//    quand le runtime Electron est inchangé.
+try {
+  const portableApp = path.join(root, 'dist', 'Snipe MC-portable', 'resources', 'app');
+  const appZip = path.join(root, 'dist', 'app.zip');
+  fs.rmSync(appZip, { force: true });
+  const z = spawnSync('powershell', ['-NoProfile', '-Command',
+    `Compress-Archive -Path '${portableApp}' -DestinationPath '${appZip}' -Force`], { stdio: 'inherit' });
+  if (z.status === 0 && fs.existsSync(appZip)) {
+    const zbuf = fs.readFileSync(appZip);
+    const electronVer = JSON.parse(fs.readFileSync(path.join(root, 'node_modules', 'electron', 'package.json'), 'utf8')).version;
+    const meta = { version, electron: electronVer, sha256: crypto.createHash('sha256').update(zbuf).digest('hex'), size: zbuf.length };
+    const metaFile = path.join(root, 'dist', 'app-update.json');
+    fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2));
+    const up = spawnSync('gh', ['release', 'upload', tag, appZip, metaFile, '--clobber'], { stdio: 'inherit' });
+    if (up.status === 0) console.log(`  ✓ MAJ différentielle publiée (app.zip ${(zbuf.length / 1e6).toFixed(1)} Mo, electron ${electronVer})`);
+  } else {
+    console.log('  (app.zip non créé — les clients utiliseront l\'installeur complet)');
+  }
+} catch (e) {
+  console.log('  (MAJ différentielle ignorée :', e.message, ')');
+}
+
 console.log(`\n✓ Publié : https://github.com/saliox/snipe-mc/releases/tag/${tag}`);
 console.log('  Les apps installées le récupéreront automatiquement au prochain lancement.');

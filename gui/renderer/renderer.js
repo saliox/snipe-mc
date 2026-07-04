@@ -216,7 +216,9 @@ async function runBulk(names, { silent = false } = {}) {
   cprint('ok', `Terminé en ${(s.elapsedMs / 1000).toFixed(1)}s — libres:${s.free} pris:${s.taken} inval:${s.invalid} err:${s.errors}${s.throttleEvents ? ` · ${s.throttleEvents} throttles gérés` : ''}`);
   $('bulkStats').innerHTML = `<span class="ok">${s.free} libres</span> · ${s.taken} pris · ${s.invalid} inval. · ${s.errors} err.`;
   saveCheckpoint();
+  await showTopFree();
   await exportFree({ auto: true });
+  refreshHistStats();
 }
 
 $('bulkBtn').onclick = () => {
@@ -247,14 +249,28 @@ $('exportCsvBtn').onclick = async () => {
   if (r.ok) cprint('ok', `${allResults.size} résultats (CSV) → ${r.path}`);
 };
 
+// Classe les libres par désirabilité (meilleurs d'abord) ; repli si l'IPC échoue.
+async function rankedFree() {
+  const r = await window.api.rankNames(freeList);
+  return (r && r.ok) ? r.ranked : freeList.map((name) => ({ name, tier: '?' }));
+}
+async function showTopFree() {
+  if (!freeList.length) return;
+  const ranked = await rankedFree();
+  const top = ranked.slice(0, 8).map((x) => `${x.name}(${x.tier})`).join('  ');
+  cprint('free', `★ meilleurs libres : ${top}`);
+}
+
 async function exportFree({ auto } = {}) {
   if (!freeList.length) {
     if (!auto) cprint('warn', 'Aucun pseudo libre à exporter.');
     else cprint('info', 'Aucun pseudo libre trouvé — pas de fichier à proposer.');
     return;
   }
+  const ranked = await rankedFree();               // meilleurs pseudos d'abord
+  const lines = ranked.map((x) => x.name);
   const stamp = new Date().toISOString().slice(0, 10);
-  const r = await window.api.saveTxt({ suggested: `pseudos-libres-${freeList.length}-${stamp}.txt`, content: freeList.join('\n') + '\n' });
+  const r = await window.api.saveTxt({ suggested: `pseudos-libres-${freeList.length}-${stamp}.txt`, content: lines.join('\n') + '\n' });
   if (r.canceled) { cprint('info', `Enregistrement annulé (${freeList.length} libres gardés — bouton EXPORT LIBRES dispo).`); return; }
   if (r.ok) cprint('ok', `${freeList.length} pseudos libres → ${r.path}`);
   else cprint('err', 'Export: ' + (r.error || 'échec'));
@@ -285,15 +301,21 @@ function uniLine() {
   return `∞ ${allResults.size} checkés · <span class="free">${tally.free} libres</span> · ` +
     `<span class="taken">${tally.taken} pris</span> · <span class="err">${tally.error} échecs</span> · ${rate}/s · ${fmtDur(secs * 1000)}`;
 }
+function proxyBadge(s) {
+  if (s.proxiesTotal == null) return '';
+  const cls = s.proxiesAlive === 0 ? 'err' : 'muted';
+  return ` · <span class="${cls}">proxies ${s.proxiesAlive}/${s.proxiesTotal}</span>`;
+}
 window.api.onBulkStats((s) => {
+  const extra = (s.throttled ? ' · <span class="warn">↓ throttle</span>' : '') + proxyBadge(s);
   // En illimité (détecté via uniTimer, fiable), on affiche le CUMUL (les
   // compteurs backend sont par-batch). Sinon : progression du run courant.
-  if (uniTimer) { $('bulkEta').innerHTML = uniLine() + (s.throttled ? ' · <span class="warn">↓ throttle</span>' : ''); return; }
+  if (uniTimer) { $('bulkEta').innerHTML = uniLine() + extra; return; }
   const eta = s.etaMs != null ? fmtDur(s.etaMs) : '—';
   const rate = s.rate ? s.rate.toFixed(1) : '0';
   $('bulkEta').innerHTML = `${s.done}/${s.total} · ${rate}/s · ETA ${eta}` +
     ` · <span class="free">${tally.free} libres</span> · <span class="taken">${tally.taken} pris</span> · <span class="err">${tally.error} échecs</span>` +
-    `${s.throttled ? ' · <span class="warn">↓ throttle</span>' : ''}`;
+    extra;
 });
 
 function saveCheckpoint() {
@@ -384,6 +406,7 @@ $('genUnlimitedBtn').onclick = async () => {
   setUnlimitedRunning(false);
   $('bulkEta').textContent = '';
   cprint('ok', `Scan illimité terminé — ${allResults.size} checkés, ${freeList.length} libres.`);
+  await showTopFree();
   await exportFree({ auto: true });
 };
 
@@ -403,8 +426,50 @@ $('checkBtn').onclick = async () => {
     html += ` · compte: ${lbl}`;
   }
   if (!r.valid) html += ' <span class="warn">(format invalide)</span>';
+  if (r.seen) {
+    const d = new Date(r.seen.ts).toLocaleDateString('fr-FR');
+    html += ` <span class="muted">· déjà vu ${esc(r.seen.state)} le ${d}</span>`;
+  }
   $('checkResult').innerHTML = html;
   cprint(r.public?.free ? 'free' : 'taken', `[CHECK] ${logmsg}${r.account ? ' · ' + r.account : ''}`);
+  refreshHistStats();
+};
+
+// ----- Historique -----
+async function refreshHistStats() {
+  const r = await window.api.historyStats();
+  if (r.ok) $('histStats').textContent = `${r.total} connus · ${r.free} libres`;
+}
+$('histSearchBtn').onclick = async () => {
+  const q = $('histSearch').value.trim();
+  const [lk, sr] = await Promise.all([window.api.historyLookup(q), window.api.historySearch(q)]);
+  let html = '';
+  if (q && lk.ok && lk.entry) {
+    const d = new Date(lk.entry.ts).toLocaleDateString('fr-FR');
+    const st = { free: '<span class="free">LIBRE</span>', taken: '<span class="bad">PRIS</span>' }[lk.entry.state] || esc(lk.entry.state);
+    html += `${esc(q)} : ${st} (vu le ${d}) &nbsp; ·&nbsp; `;
+  }
+  const names = (sr.ok && sr.names) ? sr.names : [];
+  html += `${names.length} libres connus${q ? ` contenant « ${esc(q)} »` : ''}`;
+  $('histResult').innerHTML = html;
+  if (names.length) cprint('free', `Libres connus: ${names.slice(0, 40).join('  ')}${names.length > 40 ? ' …' : ''}`);
+};
+$('histSearch').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('histSearchBtn').click(); });
+$('histExportBtn').onclick = async () => {
+  const sr = await window.api.historyFreeAll();
+  const names = (sr.ok && sr.names) ? sr.names : [];
+  if (!names.length) { cprint('warn', 'Aucun libre connu à exporter.'); return; }
+  const rk = await window.api.rankNames(names);
+  const lines = (rk.ok ? rk.ranked.map((x) => x.name) : names);
+  const stamp = new Date().toISOString().slice(0, 10);
+  const r = await window.api.saveTxt({ suggested: `libres-connus-${names.length}-${stamp}.txt`, content: lines.join('\n') + '\n' });
+  if (r.ok) cprint('ok', `${names.length} libres connus (triés) → ${r.path}`);
+};
+$('histClearBtn').onclick = async () => {
+  await window.api.historyClear();
+  $('histResult').textContent = 'historique vidé';
+  cprint('info', 'Historique vidé.');
+  refreshHistStats();
 };
 
 // ----- NTP -----
@@ -536,6 +601,7 @@ $('cooldownBtn').onclick = async () => {
 // ----- Init -----
 refreshAccount();
 refreshAccounts();
+refreshHistStats();
 updateBulkCount();
 loadCheckpoint();
 cprint('step', 'Minecraft Sniper prêt. Colle un token ou connecte-toi (MS).');
