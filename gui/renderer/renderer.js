@@ -250,20 +250,20 @@ window.api.onBulkResult((r) => {
   if (r.total) $('bulkBar').style.width = Math.round((r.done / r.total) * 100) + '%';
   if (!unlimited && allResults.size % 25 === 0) saveCheckpoint();
 });
+function uniLine() {
+  const secs = (Date.now() - uniStart) / 1000;
+  const rate = secs > 0 ? (allResults.size / secs).toFixed(1) : '0';
+  return `∞ ${allResults.size} checkés · <span class="free">${tally.free} libres</span> · ` +
+    `<span class="taken">${tally.taken} pris</span> · <span class="err">${tally.error} échecs</span> · ${rate}/s · ${fmtDur(secs * 1000)}`;
+}
 window.api.onBulkStats((s) => {
-  // En illimité, les compteurs du backend sont par-batch : on affiche le CUMUL.
-  if (unlimited) {
-    const secs = (Date.now() - uniStart) / 1000;
-    const orate = secs > 0 ? (allResults.size / secs).toFixed(1) : '0';
-    $('bulkEta').innerHTML = `∞ ${allResults.size} checkés · <span class="free">${tally.free} libres</span> · ` +
-      `<span class="taken">${tally.taken} pris</span> · <span class="err">${tally.error} échecs</span> · ${orate}/s · ${fmtDur(secs * 1000)}` +
-      `${s.throttled ? ' · <span class="warn">↓ throttle</span>' : ''}`;
-    return;
-  }
+  // En illimité (détecté via uniTimer, fiable), on affiche le CUMUL (les
+  // compteurs backend sont par-batch). Sinon : progression du run courant.
+  if (uniTimer) { $('bulkEta').innerHTML = uniLine() + (s.throttled ? ' · <span class="warn">↓ throttle</span>' : ''); return; }
   const eta = s.etaMs != null ? fmtDur(s.etaMs) : '—';
   const rate = s.rate ? s.rate.toFixed(1) : '0';
-  $('bulkEta').innerHTML = `${s.done}/${s.total} · ${rate}/s · ETA ${eta} · cadence ~${Math.round(1000 / Math.max(1, s.intervalMs))}/s` +
-    ` · <span class="free">${s.free} libres</span> · <span class="taken">${s.taken} pris</span> · <span class="err">${s.errors} échecs</span>` +
+  $('bulkEta').innerHTML = `${s.done}/${s.total} · ${rate}/s · ETA ${eta}` +
+    ` · <span class="free">${tally.free} libres</span> · <span class="taken">${tally.taken} pris</span> · <span class="err">${tally.error} échecs</span>` +
     `${s.throttled ? ' · <span class="warn">↓ throttle</span>' : ''}`;
 });
 
@@ -317,10 +317,9 @@ function setUnlimitedRunning(on) {
   $('genBtn').disabled = on;
 }
 function updateUniInfo() {
-  const secs = (Date.now() - uniStart) / 1000;
-  const rate = secs > 0 ? allResults.size / secs : 0;
-  $('unlimitedInfo').innerHTML = `∞ ${allResults.size} checkés · <span class="free">${tally.free} libres</span> · ` +
-    `<span class="taken">${tally.taken} pris</span> · <span class="err">${tally.error} échecs</span> · ${rate.toFixed(1)}/s · ${fmtDur(secs * 1000)}`;
+  const html = uniLine();
+  $('unlimitedInfo').innerHTML = html;
+  $('bulkEta').innerHTML = html; // même info cumulée dans le module BULK
 }
 $('genUnlimitedStopBtn').onclick = () => { unlimited = false; window.api.bulkStop(); cprint('warn', 'Arrêt du scan illimité…'); };
 $('genUnlimitedBtn').onclick = async () => {
@@ -349,7 +348,8 @@ $('genUnlimitedBtn').onclick = async () => {
     if (unlimitedThreshold && freeList.length >= unlimitedThreshold) { cprint('ok', `Seuil de ${unlimitedThreshold} libres atteint.`); break; }
   }
   unlimited = false;
-  clearInterval(uniTimer); updateUniInfo();
+  clearInterval(uniTimer); uniTimer = null;
+  $('unlimitedInfo').innerHTML = uniLine(); // résumé final (cumulé)
   setUnlimitedRunning(false);
   $('bulkEta').textContent = '';
   cprint('ok', `Scan illimité terminé — ${allResults.size} checkés, ${freeList.length} libres.`);
