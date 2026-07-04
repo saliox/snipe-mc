@@ -36,7 +36,7 @@ function cprint(level, msg) {
   logBox.appendChild(line);
   logBox.scrollTop = logBox.scrollHeight;
 }
-function esc(s) { return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 window.api.onLog((e) => cprint(e.level, e.msg));
 $('clearLogs').onclick = () => { logBox.innerHTML = ''; };
 
@@ -53,7 +53,7 @@ async function refreshAccount() {
     line.innerHTML = `whoami :: <span class="free">${esc(r.profile.name)}</span> <span class="muted">[${src}]</span>`;
     $('tokenStatus').innerHTML = `<span class="ok">✔ ${esc(r.profile.name)}</span>`;
     // Remplit auto la date du dernier changement (sans écraser une saisie manuelle).
-    if (!$('dropLastChange').value) autoFillDropDate({ silent: true }).catch(() => {});
+    if (!$('dropLastChange').value) autoFillDropDate({ silent: true, onlyIfEmpty: true }).catch(() => {});
   } else {
     line.innerHTML = 'whoami :: <span class="muted">non connecté</span>';
   }
@@ -99,6 +99,7 @@ $('changeBtn').onclick = async () => {
   if (r.ok) {
     $('changeResult').innerHTML = `<span class="ok">✔ pseudo changé en ${esc(r.name)}</span>`;
     cprint('ok', `Pseudo changé en ${r.name} !`);
+    $('dropLastChange').value = ''; // date du dernier changement obsolète → refresh via refreshAccount
     refreshAccount();
   } else {
     const m = r.reason || r.error || 'échec';
@@ -303,7 +304,7 @@ async function claimName(name) {
   if (!window.confirm(`Réclamer « ${name} » ? Ça change le pseudo du compte du token actif (cooldown 30 j).`)) return;
   cprint('step', `Réclamation de ${name}…`);
   const r = await window.api.changeUsername(name);
-  if (r.ok) { cprint('ok', `🎯 Pseudo changé en ${r.name} !`); refreshAccount(); }
+  if (r.ok) { cprint('ok', `🎯 Pseudo changé en ${r.name} !`); $('dropLastChange').value = ''; refreshAccount(); }
   else cprint('err', `Échec claim ${name} : ${r.reason || r.error || 'erreur'}`);
 }
 
@@ -767,10 +768,12 @@ function applyDrop(baseMs, note) {
 
 // Récupère la date du dernier changement depuis le compte connecté (token/MS).
 // compute=true → calcule aussi le drop ; silent=true → ne rien afficher en cas d'échec.
-async function autoFillDropDate({ compute = false, silent = false } = {}) {
+async function autoFillDropDate({ compute = false, silent = false, onlyIfEmpty = false } = {}) {
   const r = await window.api.nameChangeInfo();
   if (!r || !r.ok) { if (!silent) $('dropInfo').innerHTML = `<span class="bad">${esc((r && r.error) || 'connecte un compte d’abord')}</span>`; return null; }
   if (!r.changedAt) { if (!silent) $('dropInfo').innerHTML = '<span class="muted">ce compte n’a jamais changé de pseudo — aucune date à récupérer</span>'; return null; }
+  // Ne pas écraser une date saisie à la main pendant l'attente réseau (course au démarrage).
+  if (onlyIfEmpty && $('dropLastChange').value) return null;
   const d = new Date(r.changedAt);
   const p = (n) => String(n).padStart(2, '0');
   $('dropLastChange').value = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
