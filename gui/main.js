@@ -1,5 +1,6 @@
 // Processus principal Electron. Fait le pont entre l'UI et le moteur de snipe.
 import { app, BrowserWindow, ipcMain, shell, dialog, nativeImage } from 'electron';
+import { request } from 'undici';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -232,6 +233,29 @@ ipcMain.handle('bulk-check', async (_e, { names, delayMs, useToken, proxies }) =
   finally { if (proxyPool) await proxyPool.close(); }
 });
 ipcMain.handle('bulk-stop', () => { bulkStop = true; return { ok: true }; });
+
+// Récupère une liste publique de proxies HTTP gratuits (plusieurs sources en repli).
+ipcMain.handle('fetch-proxies', async () => {
+  const sources = [
+    'https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt',
+    'https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt',
+    'https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/http/data.txt',
+  ];
+  for (const url of sources) {
+    try {
+      const { statusCode, body } = await request(url, {
+        headers: { 'user-agent': 'snipe-mc' }, maxRedirections: 3, headersTimeout: 6000, bodyTimeout: 10000,
+      });
+      if (statusCode !== 200) { await body.dump(); continue; }
+      const text = await body.text();
+      const proxies = text.split(/\r?\n/)
+        .map((s) => s.trim().replace(/^https?:\/\//i, ''))
+        .filter((s) => /^\d{1,3}(\.\d{1,3}){3}:\d{2,5}$/.test(s));
+      if (proxies.length) return { ok: true, proxies: proxies.slice(0, 400), source: url };
+    } catch { /* source suivante */ }
+  }
+  return { ok: false, error: 'Aucune source de proxies joignable.' };
+});
 
 // --- Snipe ---
 ipcMain.handle('snipe', async (_e, opts) => {

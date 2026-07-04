@@ -170,6 +170,17 @@ $('loadProxyBtn').onclick = async () => {
   $('proxies').value = r.names.join('\n');
   $('proxyCount').textContent = `${r.names.length} proxies`;
 };
+$('fetchProxyBtn').onclick = async () => {
+  $('fetchProxyBtn').disabled = true;
+  $('proxyCount').textContent = 'récupération…';
+  const r = await window.api.fetchProxies();
+  $('fetchProxyBtn').disabled = false;
+  if (!r.ok) { cprint('err', 'Proxies: ' + r.error); $('proxyCount').textContent = ''; return; }
+  const merged = [...new Set([...proxiesArray(), ...r.proxies])];
+  $('proxies').value = merged.join('\n');
+  $('proxyCount').textContent = `${merged.length} proxies (gratuits)`;
+  cprint('info', `${r.proxies.length} proxies gratuits récupérés ⚠ lents/instables — le token reste en direct (jamais via proxy).`);
+};
 
 // names = pseudos à traiter ce run (peut être un sous-ensemble en cas de reprise).
 // lastNames (la liste complète suivie) est géré par les appelants, PAS ici.

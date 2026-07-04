@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('api', {
   saveTxt: (payload) => ipcRenderer.invoke('save-txt', payload),
   bulkCheck: (payload) => ipcRenderer.invoke('bulk-check', payload),
   bulkStop: () => ipcRenderer.invoke('bulk-stop'),
+  fetchProxies: () => ipcRenderer.invoke('fetch-proxies'),
 
   snipe: (opts) => ipcRenderer.invoke('snipe', opts),
   stop: () => ipcRenderer.invoke('stop'),
