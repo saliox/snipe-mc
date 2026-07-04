@@ -106,12 +106,13 @@ export async function bulkCheck(names, opts = {}) {
       onSuccess();
       if (res.free === true) {
         free++; freeList.push(item.name); checked++;
-        let detail = 'LIBRE';
+        // Le tag [LIBRE] porte déjà l'info : on ne détaille que le statut compte.
+        let detail = '';
         if (token) {
           try {
             const st = await nameStatus(item.name, token);
-            detail = st === 'AVAILABLE' ? 'LIBRE (réclamable)' : st === 'NOT_ALLOWED' ? 'LIBRE mais BLOQUÉ' : `LIBRE (${st})`;
-          } catch { /* garde LIBRE */ }
+            detail = st === 'AVAILABLE' ? 'réclamable' : st === 'NOT_ALLOWED' ? 'BLOQUÉ' : st;
+          } catch { /* pas de détail */ }
         }
         onResult({ done: checked, total, name: item.name, state: 'free', detail });
       } else if (res.free === false) {
