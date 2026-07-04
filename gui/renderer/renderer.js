@@ -239,13 +239,19 @@ $('resumeBtn').onclick = () => {
     startUnlimited(false);
     return;
   }
-  // Reprise d'un BULK : ne traite que les pseudos restants.
+  // Reprise d'un BULK.
   $('bulkNames').value = lastNames.join('\n');
   updateBulkCount();
   const remaining = lastNames.filter((n) => !allResults.has(n.toLowerCase()));
-  if (!remaining.length) { cprint('info', 'Rien à reprendre (tout est déjà checké).'); return; }
-  cprint('step', `Reprise : ${remaining.length} restants sur ${lastNames.length}`);
-  runBulk(remaining);
+  if (remaining.length) {
+    cprint('step', `Reprise : ${remaining.length} restants sur ${lastNames.length}`);
+    runBulk(remaining);
+  } else {
+    // Session déjà terminée -> on RELANCE la liste complète (nouvelle passe).
+    cprint('step', `Relance de la dernière liste (${lastNames.length} pseudos)…`);
+    freeList = []; allResults = new Map(); tally = { free: 0, taken: 0, error: 0 };
+    runBulk(lastNames);
+  }
 };
 
 $('exportFreeBtn').onclick = () => exportFree({ auto: false });
@@ -373,11 +379,13 @@ async function loadCheckpoint() {
     $('bulkNames').value = lastNames.join('\n');
     updateBulkCount();
     const remaining = lastNames.filter((n) => !allResults.has(n.toLowerCase()));
+    // Le bouton REPRENDRE est TOUJOURS proposé quand une session existe :
+    // reprend les restants, ou relance la liste si la session était terminée.
+    $('resumeBtn').classList.remove('hidden');
     if (remaining.length) {
-      $('resumeBtn').classList.remove('hidden');
-      cprint('info', `Dernière session rechargée : ${remaining.length}/${lastNames.length} restants — bouton REPRENDRE dispo.`);
+      cprint('info', `Dernière session rechargée : ${remaining.length}/${lastNames.length} restants — REPRENDRE pour continuer.`);
     } else {
-      cprint('info', `Dernière session rechargée (${lastNames.length} pseudos, terminée).`);
+      cprint('info', `Dernière session rechargée (${lastNames.length} pseudos, terminée) — REPRENDRE pour relancer.`);
     }
   } catch { /* ignore */ }
 }
