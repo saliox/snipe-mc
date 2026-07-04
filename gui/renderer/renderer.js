@@ -215,7 +215,7 @@ async function runBulk(names, { silent = false } = {}) {
   if (silent) return; // le scan illimité gère résumé/export/checkpoint globalement
   cprint('ok', `Terminé en ${(s.elapsedMs / 1000).toFixed(1)}s — libres:${s.free} pris:${s.taken} inval:${s.invalid} err:${s.errors}${s.throttleEvents ? ` · ${s.throttleEvents} throttles gérés` : ''}`);
   $('bulkStats').innerHTML = `<span class="ok">${s.free} libres</span> · ${s.taken} pris · ${s.invalid} inval. · ${s.errors} err.`;
-  saveCheckpoint();
+  await saveCheckpointNow();
   await showTopFree();
   await exportFree({ auto: true });
   refreshHistStats();
@@ -318,23 +318,38 @@ window.api.onBulkStats((s) => {
     extra;
 });
 
+// Checkpoint persistant (fichier userData via main). Sauvegarde débouncée pour
+// ne pas spammer l'IPC pendant un gros scan.
+let checkpointTimer = null;
 function saveCheckpoint() {
-  try { localStorage.setItem('bulkCheckpoint', JSON.stringify({ names: lastNames, results: [...allResults.values()], ts: Date.now() })); } catch { /* quota */ }
+  if (checkpointTimer) return;
+  checkpointTimer = setTimeout(() => {
+    checkpointTimer = null;
+    window.api.checkpointSave({ names: lastNames, results: [...allResults.values()], tally, ts: Date.now() });
+  }, 2000);
 }
-function loadCheckpoint() {
+function saveCheckpointNow() {
+  if (checkpointTimer) { clearTimeout(checkpointTimer); checkpointTimer = null; }
+  return window.api.checkpointSave({ names: lastNames, results: [...allResults.values()], tally, ts: Date.now() });
+}
+async function loadCheckpoint() {
   try {
-    const d = JSON.parse(localStorage.getItem('bulkCheckpoint') || 'null');
+    const r = await window.api.checkpointLoad();
+    const d = r && r.ok ? r.data : null;
     if (!d || !Array.isArray(d.names) || !d.names.length) return;
     lastNames = d.names;
     allResults = new Map((d.results || []).map((v) => [v.name.toLowerCase(), v]));
     freeList = (d.results || []).filter((v) => v.state === 'free').map((v) => v.name);
+    if (d.tally) tally = { free: d.tally.free || 0, taken: d.tally.taken || 0, error: d.tally.error || 0 };
+    // Recharge TOUJOURS la liste de la dernière session à l'écran.
+    $('bulkNames').value = lastNames.join('\n');
+    updateBulkCount();
     const remaining = lastNames.filter((n) => !allResults.has(n.toLowerCase()));
-    if (remaining.length && remaining.length < lastNames.length) {
-      // Recharge la liste complète à l'écran + remet le bon compteur.
-      $('bulkNames').value = lastNames.join('\n');
-      updateBulkCount();
+    if (remaining.length) {
       $('resumeBtn').classList.remove('hidden');
-      cprint('info', `Check précédent interrompu : ${remaining.length}/${lastNames.length} restants — liste rechargée, bouton REPRENDRE dispo.`);
+      cprint('info', `Dernière session rechargée : ${remaining.length}/${lastNames.length} restants — bouton REPRENDRE dispo.`);
+    } else {
+      cprint('info', `Dernière session rechargée (${lastNames.length} pseudos, terminée).`);
     }
   } catch { /* ignore */ }
 }

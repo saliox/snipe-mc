@@ -221,6 +221,23 @@ ipcMain.handle('history-search', (_e, q) => { try { return { ok: true, names: hi
 ipcMain.handle('history-free-all', () => { try { return { ok: true, names: history.allFree() }; } catch (e) { return { ok: false, error: e.message }; } });
 ipcMain.handle('history-clear', () => { try { history.clear(); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; } });
 
+// --- Checkpoint de session (reprise) : fichier userData, persistant et fiable
+//     (contrairement au localStorage file:// d'Electron). ---
+const CHECKPOINT_FILE = () => path.join(app.getPath('userData'), 'checkpoint.json');
+ipcMain.handle('checkpoint-save', (_e, data) => {
+  try {
+    const tmp = CHECKPOINT_FILE() + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(data));
+    fs.renameSync(tmp, CHECKPOINT_FILE());
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+ipcMain.handle('checkpoint-load', () => {
+  try { return { ok: true, data: JSON.parse(fs.readFileSync(CHECKPOINT_FILE(), 'utf8')) }; }
+  catch { return { ok: true, data: null }; }
+});
+ipcMain.handle('checkpoint-clear', () => { try { fs.rmSync(CHECKPOINT_FILE(), { force: true }); } catch { /* ignore */ } return { ok: true }; });
+
 // --- Générateur ---
 ipcMain.handle('generate', (_e, opts) => {
   try {
