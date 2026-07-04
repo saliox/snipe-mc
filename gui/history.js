@@ -6,23 +6,50 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const FILE = () => path.join(app.getPath('userData'), 'history.json');
+const MAX_ENTRIES = 200000;     // garde-fou : au-delà, on élague (libres + récents)
 let map = null;                 // name_lower -> { name, state, ts }
-let dirty = false, flushTimer = null;
+let dirty = false, flushTimer = null, writing = false;
 
 function ensure() {
   if (map) return;
   try { map = new Map(Object.entries(JSON.parse(fs.readFileSync(FILE(), 'utf8')))); }
   catch { map = new Map(); }
 }
+// Élague en gardant les libres d'abord, puis les plus récents. Laisse ~10 % de
+// marge pour ne pas ré-élaguer à chaque écriture.
+function trim() {
+  if (map.size <= MAX_ENTRIES) return;
+  const keep = Math.floor(MAX_ENTRIES * 0.9);
+  const entries = [...map.entries()].sort((a, b) => {
+    const fa = a[1].state === 'free' ? 1 : 0, fb = b[1].state === 'free' ? 1 : 0;
+    return fb - fa || b[1].ts - a[1].ts;
+  });
+  map = new Map(entries.slice(0, keep));
+}
 function scheduleFlush() {
   dirty = true;
   if (flushTimer) return;
   flushTimer = setTimeout(() => { flushTimer = null; flushNow(); }, 15000);
 }
+// Écriture NON bloquante (temp + rename atomique). Une seule à la fois.
 export function flushNow() {
-  if (!dirty || !map) return;
-  dirty = false;
-  try { fs.writeFileSync(FILE(), JSON.stringify(Object.fromEntries(map))); } catch { /* ignore */ }
+  if (!dirty || !map || writing) return;
+  trim();
+  const json = JSON.stringify(Object.fromEntries(map));
+  const tmp = FILE() + '.tmp';
+  dirty = false; writing = true;
+  fs.writeFile(tmp, json, (err) => {
+    if (!err) { try { fs.renameSync(tmp, FILE()); } catch { /* ignore */ } }
+    writing = false;
+    if (dirty) flushNow(); // des changements pendant l'écriture
+  });
+}
+// Écriture SYNCHRONE (fermeture de l'app : garantit la persistance).
+export function flushSync() {
+  if (!map) return;
+  trim();
+  try { const tmp = FILE() + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(Object.fromEntries(map))); fs.renameSync(tmp, FILE()); dirty = false; }
+  catch { /* ignore */ }
 }
 
 // Priorité d'information : free/taken écrasent error/invalid (une vraie réponse
@@ -59,4 +86,4 @@ export function allFree() {
   for (const v of map.values()) if (v.state === 'free') out.push(v.name);
   return out;
 }
-export function clear() { ensure(); map.clear(); dirty = true; flushNow(); }
+export function clear() { ensure(); map.clear(); dirty = true; flushSync(); }

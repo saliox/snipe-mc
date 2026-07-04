@@ -118,7 +118,7 @@ app.on('web-contents-created', (_e, contents) => {
 });
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-app.on('before-quit', () => { try { history.flushNow(); } catch { /* ignore */ } });
+app.on('before-quit', () => { try { history.flushSync(); } catch { /* ignore */ } });
 
 // --- Meta / MAJ ---
 ipcMain.handle('config-status', () => ({

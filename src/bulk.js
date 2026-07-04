@@ -82,6 +82,10 @@ export async function bulkCheck(names, opts = {}) {
 
   function onThrottle(retryAfter) {
     throttleEvents++;
+    // Avec des proxies, un 429 = l'IP de CE proxy est limitée, pas les autres :
+    // on retente sur un autre proxy sans figer toute la rotation (sinon on perd
+    // le bénéfice des proxies). En direct, on applique la pause globale AIMD.
+    if (proxyPool) return;
     interval = Math.min(interval * 2, MAX_INTERVAL);
     successStreak = 0;
     const backoff = retryAfter ? retryAfter * 1000 : Math.min(interval * 4, 8000);

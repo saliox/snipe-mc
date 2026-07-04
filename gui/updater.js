@@ -99,7 +99,7 @@ async function tryAppOnlyUpdate() {
     send('update-status', { state: 'downloading' });
     await downloadTo({ url: zipAsset.url, size: meta.size, sha256: meta.sha256 || zipAsset.sha256 }, dest, (p) => send('update-progress', p));
     send('update-status', { state: 'installing' });
-    applyAppZip(dest);
+    applyAppZip(dest, meta.version || lastInfo.version);
     return true;
   } catch (e) {
     console.log('[update] MAJ différentielle impossible, repli installeur :', e.message);
@@ -109,15 +109,19 @@ async function tryAppOnlyUpdate() {
 
 // Remplace resources/app par le contenu de app.zip (racine = dossier app/) via un
 // script PowerShell détaché, puis relance l'app.
-function applyAppZip(zipPath) {
+function applyAppZip(zipPath, version) {
+  // Échappe les apostrophes pour les chaînes PowerShell (ex. C:\Users\O'Brien).
+  const q = (s) => String(s).replace(/'/g, "''");
   const exe = process.execPath;
   const resourcesDir = process.resourcesPath; // <install>\resources
   const ps = path.join(os.tmpdir(), 'snipemc-appupdate.ps1');
   const script =
     "$ErrorActionPreference='SilentlyContinue'\r\n" +
     'Start-Sleep -Seconds 1\r\n' +
-    `Expand-Archive -Path '${zipPath}' -DestinationPath '${resourcesDir}' -Force\r\n` +
-    `Start-Process -FilePath '${exe}'\r\n`;
+    `Expand-Archive -Path '${q(zipPath)}' -DestinationPath '${q(resourcesDir)}' -Force\r\n` +
+    // Aligne la version affichée dans « Applications installées ».
+    `Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\SnipeMC' -Name DisplayVersion -Value '${q(version || '')}'\r\n` +
+    `Start-Process -FilePath '${q(exe)}'\r\n`;
   fs.writeFileSync(ps, script);
   const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps], { detached: true, stdio: 'ignore', windowsHide: true });
   child.unref();
