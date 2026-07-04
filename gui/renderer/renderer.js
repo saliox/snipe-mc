@@ -307,7 +307,8 @@ window.api.onBulkResult((r) => {
 });
 function uniLine() {
   const secs = (Date.now() - uniStart) / 1000;
-  const rate = secs > 0 ? (allResults.size / secs).toFixed(1) : '0';
+  // Débit = checkés DEPUIS le (re)démarrage / temps (sinon absurde après reprise).
+  const rate = secs > 0 ? ((allResults.size - uniBaseCount) / secs).toFixed(1) : '0';
   return `∞ ${allResults.size} checkés · <span class="free">${tally.free} libres</span> · ` +
     `<span class="taken">${tally.taken} pris</span> · <span class="err">${tally.error} échecs</span> · ${rate}/s · ${fmtDur(secs * 1000)}`;
 }
@@ -391,7 +392,7 @@ function setBulkRunning(on) {
 // ----- Scan illimité (génère + check en boucle jusqu'au stop ou au seuil) -----
 let unlimited = false;
 let unlimitedThreshold = 0;
-let uniStart = 0, uniTimer = null;
+let uniStart = 0, uniTimer = null, uniBaseCount = 0;
 
 function currentGenOpts(count) {
   return {
@@ -432,10 +433,12 @@ $('genUnlimitedBtn').onclick = () => startUnlimited(true);
 async function startUnlimited(fresh) {
   if (unlimited) return;
   unlimited = true;
+  resumeUnlimited = false; // on lance/reprend : plus une proposition en attente
   unlimitedThreshold = Number($('unlimitedThreshold').value) || 0;
   if (fresh) { freeList = []; allResults = new Map(); tally = { free: 0, taken: 0, error: 0 }; }
   lastNames = [];
   uniStart = Date.now();
+  uniBaseCount = allResults.size; // pour un débit correct (checkés SINCE reprise)
   setUnlimitedRunning(true);
   $('bulkProgress').classList.remove('hidden');
   cprint('step', `SCAN ILLIMITÉ (${$('genMode').value})${fresh ? '' : ' · reprise'}${unlimitedThreshold ? ` · stop à ${unlimitedThreshold} libres` : ' · stop manuel'}`);
@@ -465,6 +468,8 @@ async function startUnlimited(fresh) {
   setUnlimitedRunning(false);
   $('bulkEta').textContent = '';
   cprint('ok', `Scan illimité terminé — ${allResults.size} checkés, ${freeList.length} libres.`);
+  // Propose de reprendre dans la même session (résultats conservés).
+  if (allResults.size) { resumeUnlimited = true; $('resumeBtn').classList.remove('hidden'); }
   await showTopFree();
   await exportFree({ auto: true });
 };

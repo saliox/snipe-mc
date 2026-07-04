@@ -224,11 +224,13 @@ ipcMain.handle('history-clear', () => { try { history.clear(); return { ok: true
 // --- Checkpoint de session (reprise) : fichier userData, persistant et fiable
 //     (contrairement au localStorage file:// d'Electron). ---
 const CHECKPOINT_FILE = () => path.join(app.getPath('userData'), 'checkpoint.json');
-ipcMain.handle('checkpoint-save', (_e, data) => {
+ipcMain.handle('checkpoint-save', async (_e, data) => {
   try {
-    const tmp = CHECKPOINT_FILE() + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(data));
-    fs.renameSync(tmp, CHECKPOINT_FILE());
+    // Écriture ASYNC (ne bloque pas le main sur de gros scans) + temp unique
+    // (pas de collision entre deux sauvegardes) + rename atomique.
+    const tmp = `${CHECKPOINT_FILE()}.${Date.now()}.tmp`;
+    await fs.promises.writeFile(tmp, JSON.stringify(data));
+    await fs.promises.rename(tmp, CHECKPOINT_FILE());
     return { ok: true };
   } catch (e) { return { ok: false, error: e.message }; }
 });
