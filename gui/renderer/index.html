@@ -41,6 +41,14 @@
         <button id="tokenClearBtn" class="btn ghost">CLEAR</button>
         <span id="tokenStatus" class="status"></span>
       </div>
+      <div class="row wrap acct-row">
+        <input id="acctLabel" class="in mono" placeholder="label du compte" spellcheck="false" />
+        <button id="acctSaveBtn" class="btn tiny">+ enregistrer</button>
+        <span class="spacer"></span>
+        <select id="acctSelect" class="in sel"><option value="">— comptes —</option></select>
+        <button id="acctUseBtn" class="btn ok tiny">switch</button>
+        <button id="acctDelBtn" class="btn ghost tiny">suppr</button>
+      </div>
     </section>
 
     <!-- CHANGE USERNAME -->
@@ -51,6 +59,10 @@
         <button id="changeBtn" class="btn danger">CHANGE USERNAME</button>
       </div>
       <div class="hint">Renomme le compte du token actif. Cooldown Java = 30 jours entre changements.</div>
+      <div class="row">
+        <button id="cooldownBtn" class="btn ghost tiny">voir cooldown</button>
+        <span id="cooldownInfo" class="status"></span>
+      </div>
       <div id="changeResult" class="status"></div>
     </section>
 
@@ -62,16 +74,27 @@
         <button id="genToBulkBtn" class="btn ghost">← depuis GENERATE</button>
         <label class="chk"><input type="checkbox" id="useToken" /> statut compte (token)</label>
         <span class="spacer"></span>
-        <label class="inl">delay(ms) <input id="delay" class="in num" type="number" value="200" min="0" /></label>
+        <label class="inl">délai min(ms) <input id="delay" class="in num" type="number" value="0" min="0" /></label>
       </div>
+      <details class="advanced">
+        <summary>proxies (rotation d'IP anti-rate-limit)</summary>
+        <div class="row">
+          <button id="loadProxyBtn" class="btn tiny">LOAD proxies .txt</button>
+          <span id="proxyCount" class="muted"></span>
+        </div>
+        <textarea id="proxies" class="in mono" rows="2" placeholder="http://user:pass@host:port  ou  host:port  (un par ligne)" spellcheck="false"></textarea>
+      </details>
       <textarea id="bulkNames" class="in mono tall" placeholder="un pseudo par ligne…" spellcheck="false"></textarea>
       <div class="row">
         <button id="bulkBtn" class="btn ok">CHECK ALL</button>
         <button id="bulkStopBtn" class="btn danger hidden">STOP</button>
+        <button id="resumeBtn" class="btn hidden">REPRENDRE</button>
         <button id="exportFreeBtn" class="btn ghost">EXPORT LIBRES</button>
+        <button id="exportCsvBtn" class="btn ghost">EXPORT CSV</button>
         <span class="spacer"></span>
         <span id="bulkStats" class="status"></span>
       </div>
+      <div id="bulkEta" class="status eta"></div>
       <div id="bulkProgress" class="uprog hidden"><div id="bulkBar"></div></div>
     </section>
 
@@ -79,6 +102,14 @@
     <section class="mod">
       <div class="mod-h">[ GENERATE ]</div>
       <div class="row wrap">
+        <label class="inl">mode
+          <select id="genMode" class="in sel">
+            <option value="random">aléatoire</option>
+            <option value="pronounceable">prononçable</option>
+            <option value="pattern">pattern</option>
+            <option value="dict">dictionnaire</option>
+          </select>
+        </label>
         <label class="inl">len <input id="genLen" class="in num" type="number" value="3" min="3" max="16" /></label>
         <label class="inl">charset
           <select id="genCharset" class="in sel">
@@ -88,6 +119,11 @@
           </select>
         </label>
         <label class="inl">count <input id="genCount" class="in num" type="number" value="50" min="1" max="20000" /></label>
+      </div>
+      <div class="row wrap">
+        <label class="inl" id="patternWrap">pattern <input id="genPattern" class="in mono" placeholder="?=lettre #=chiffre *=alnum" spellcheck="false" /></label>
+        <label class="chk"><input type="checkbox" id="filterOg" /> OG (lettres)</label>
+        <label class="chk"><input type="checkbox" id="filterNoRepeat" /> sans répét.</label>
         <label class="chk"><input type="checkbox" id="genExhaustive" /> tout énumérer</label>
       </div>
       <div class="row">
@@ -126,6 +162,7 @@
         <label class="inl">lead(ms) <input id="lead" class="in num" type="number" value="40" min="0" /></label>
         <label class="inl">conns <input id="connections" class="in num" type="number" value="3" min="1" max="10" /></label>
         <label class="chk"><input type="checkbox" id="skipNtp" /> skip NTP</label>
+        <label class="chk"><input type="checkbox" id="allAccounts" /> tous les comptes</label>
       </div>
       <div class="row">
         <button id="snipeBtn" class="btn ok">SNIPE</button>

@@ -19,6 +19,20 @@ export async function profileFromToken(token) {
   throw new Error(`Profil: HTTP ${statusCode}`);
 }
 
+// Éligibilité au changement de nom (cooldown 30 jours).
+// Renvoie { allowed, changedAt, createdAt, availableAt } (availableAt = null si allowed).
+export async function nameChangeInfo(token) {
+  const { statusCode, body } = await request(`${HOST}/minecraft/profile/namechange`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  if (statusCode !== 200) { await body.dump(); throw new Error(`namechange HTTP ${statusCode}`); }
+  const d = await body.json();
+  const changedAt = d.changedAt ? Date.parse(d.changedAt) : null;
+  const COOLDOWN = 30 * 24 * 3600 * 1000;
+  const availableAt = (!d.nameChangeAllowed && changedAt) ? changedAt + COOLDOWN : null;
+  return { allowed: !!d.nameChangeAllowed, changedAt, createdAt: d.createdAt ? Date.parse(d.createdAt) : null, availableAt };
+}
+
 // Change le pseudo du compte lié au token.
 // Renvoie { ok, status, reason }.
 export async function changeName(name, token) {

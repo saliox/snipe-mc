@@ -2,17 +2,24 @@
 import { request } from 'undici';
 
 // API Mojang historique : 200 = pris (renvoie le profil), 404 = libre.
-export async function isNameFree(name) {
-  const { statusCode, body } = await request(
+// dispatcher optionnel : proxy undici pour répartir les requêtes.
+export async function isNameFree(name, dispatcher = null) {
+  const opts = { method: 'GET' };
+  if (dispatcher) opts.dispatcher = dispatcher;
+  const { statusCode, headers, body } = await request(
     `https://api.mojang.com/users/profiles/minecraft/${encodeURIComponent(name)}`,
-    { method: 'GET' }
+    opts
   );
   if (statusCode === 404) { await body.dump(); return { free: true }; }
   if (statusCode === 200) {
     const data = await body.json();
     return { free: false, uuid: data.id, name: data.name };
   }
-  if (statusCode === 429) { await body.dump(); return { free: null, rateLimited: true }; }
+  if (statusCode === 429) {
+    await body.dump();
+    const retryAfter = headers['retry-after'] ? Number(headers['retry-after']) : null;
+    return { free: null, rateLimited: true, retryAfter };
+  }
   await body.dump();
   return { free: null, statusCode };
 }

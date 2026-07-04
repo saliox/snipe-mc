@@ -132,6 +132,9 @@ textarea.tall { min-height: 120px; }
 .uprog { margin-top: 8px; height: 7px; background: #04070a; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
 #updateBar, #bulkBar { height: 100%; width: 0%; background: var(--green); box-shadow: 0 0 10px var(--green); transition: width .1s; }
 
+.eta { color: var(--muted); font-size: 12px; margin-top: 4px; min-height: 14px; }
+.acct-row { margin-top: 6px; }
+
 .consolewrap { display: flex; flex-direction: column; }
 .console {
   background: #03050700;

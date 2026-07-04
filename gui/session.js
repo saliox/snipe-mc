@@ -21,6 +21,9 @@ export function clearManualToken() {
   manualProfile = null;
 }
 
+// Token brut actif (pour l'enregistrer dans le gestionnaire de comptes).
+export function getManualToken() { return manualToken; }
+
 export function manualStatus() {
   return manualToken ? { active: true, profile: manualProfile } : { active: false };
 }

@@ -105,13 +105,27 @@ $('changeBtn').onclick = async () => {
   }
 };
 
+function fmtDur(ms) {
+  ms = Math.max(0, ms);
+  const s = Math.floor(ms / 1000) % 60, m = Math.floor(ms / 60000) % 60, h = Math.floor(ms / 3600000);
+  return h ? `${h}h${m}m` : m ? `${m}m${s}s` : `${s}s`;
+}
+
 // ----- Generate -----
 let lastGenerated = [];
+function syncGenMode() {
+  const mode = $('genMode').value;
+  $('patternWrap').style.display = mode === 'pattern' ? '' : 'none';
+}
+$('genMode').onchange = syncGenMode; syncGenMode();
 $('genBtn').onclick = async () => {
   const opts = {
+    mode: $('genMode').value,
     length: Number($('genLen').value),
     charset: $('genCharset').value,
     count: Number($('genCount').value),
+    pattern: $('genPattern').value.trim(),
+    filters: { og: $('filterOg').checked, noRepeat: $('filterNoRepeat').checked },
     exhaustive: $('genExhaustive').checked,
   };
   const r = await window.api.generate(opts);
@@ -119,8 +133,8 @@ $('genBtn').onclick = async () => {
   lastGenerated = r.names;
   $('bulkNames').value = r.names.join('\n');
   updateBulkCount();
-  $('genInfo').innerHTML = `<span class="ok">${r.names.length}</span> générés · espace ${r.space.toLocaleString('fr-FR')}`;
-  cprint('info', `Généré ${r.names.length} pseudos de ${opts.length} car. → BULK`);
+  $('genInfo').innerHTML = `<span class="ok">${r.names.length}</span> générés (${esc(opts.mode)}) → BULK`;
+  cprint('info', `Généré ${r.names.length} pseudos (${opts.mode}) → BULK`);
 };
 $('genToBulkBtn').onclick = () => {
   if (!lastGenerated.length) { cprint('warn', 'Rien de généré pour l\'instant.'); return; }
@@ -130,43 +144,71 @@ $('genToBulkBtn').onclick = () => {
 
 // ----- Bulk check -----
 let freeList = [];
+let allResults = new Map(); // name.toLowerCase() -> { name, state, detail }
+let lastNames = [];
 function bulkNamesArray() { return $('bulkNames').value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean); }
-function updateBulkCount() { $('bulkCount').textContent = `${bulkNamesArray().length} pseudos`; }
+function proxiesArray() { return $('proxies').value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean); }
+function updateBulkCount() {
+  const n = bulkNamesArray().length;
+  $('bulkCount').textContent = n ? `${n} pseudos · ~${fmtDur(n * 56)} estimé` : '0 pseudo';
+}
 $('bulkNames').addEventListener('input', updateBulkCount);
+$('proxies').addEventListener('input', () => { $('proxyCount').textContent = `${proxiesArray().length} proxies`; });
 
 $('loadTxtBtn').onclick = async () => {
   const r = await window.api.pickTxt();
   if (r.canceled) return;
   if (!r.ok) { cprint('err', 'Fichier: ' + r.error); return; }
-  $('bulkNames').value = r.names.join('\n');
-  updateBulkCount();
+  $('bulkNames').value = r.names.join('\n'); updateBulkCount();
   cprint('info', `Chargé ${r.names.length} pseudos depuis ${r.path}`);
 };
+$('loadProxyBtn').onclick = async () => {
+  const r = await window.api.pickTxt();
+  if (r.canceled) return;
+  if (!r.ok) { cprint('err', 'Proxies: ' + r.error); return; }
+  $('proxies').value = r.names.join('\n');
+  $('proxyCount').textContent = `${r.names.length} proxies`;
+};
 
-$('bulkBtn').onclick = async () => {
-  const names = bulkNamesArray();
+async function runBulk(names) {
   if (!names.length) { cprint('warn', 'Liste vide.'); return; }
-  freeList = [];
+  lastNames = names;
   setBulkRunning(true);
   $('bulkBar').style.width = '0%';
   $('bulkProgress').classList.remove('hidden');
-  cprint('step', `BULK CHECK — ${names.length} pseudos (delay ${$('delay').value}ms)`);
-  const r = await window.api.bulkCheck({
-    names,
-    delayMs: Number($('delay').value),
-    useToken: $('useToken').checked,
-  });
+  const proxies = proxiesArray();
+  cprint('step', `BULK CHECK — ${names.length} pseudos${proxies.length ? ` · ${proxies.length} proxies` : ''}`);
+  const r = await window.api.bulkCheck({ names, delayMs: Number($('delay').value), useToken: $('useToken').checked, proxies });
   setBulkRunning(false);
+  $('bulkEta').textContent = '';
   if (!r.ok) { cprint('err', 'Bulk: ' + r.error); return; }
   const s = r.summary;
-  cprint('ok', `Terminé — libres:${s.free} pris:${s.taken} invalides:${s.invalid} erreurs:${s.errors}`);
+  cprint('ok', `Terminé en ${(s.elapsedMs / 1000).toFixed(1)}s — libres:${s.free} pris:${s.taken} inval:${s.invalid} err:${s.errors}${s.throttleEvents ? ` · ${s.throttleEvents} throttles gérés` : ''}`);
   $('bulkStats').innerHTML = `<span class="ok">${s.free} libres</span> · ${s.taken} pris · ${s.invalid} inval. · ${s.errors} err.`;
-  // Propose automatiquement le .txt des pseudos non pris à la fin du check.
+  saveCheckpoint();
   await exportFree({ auto: true });
+}
+
+$('bulkBtn').onclick = () => { freeList = []; allResults = new Map(); runBulk(bulkNamesArray()); };
+$('bulkStopBtn').onclick = async () => { await window.api.bulkStop(); cprint('warn', 'Arrêt demandé…'); $('resumeBtn').classList.remove('hidden'); };
+$('resumeBtn').onclick = () => {
+  const remaining = lastNames.filter((n) => !allResults.has(n.toLowerCase()));
+  if (!remaining.length) { cprint('info', 'Rien à reprendre.'); $('resumeBtn').classList.add('hidden'); return; }
+  $('resumeBtn').classList.add('hidden');
+  cprint('step', `Reprise : ${remaining.length} pseudos restants`);
+  runBulk(remaining);
 };
-$('bulkStopBtn').onclick = async () => { await window.api.bulkStop(); cprint('warn', 'Arrêt demandé…'); };
 
 $('exportFreeBtn').onclick = () => exportFree({ auto: false });
+$('exportCsvBtn').onclick = async () => {
+  if (!allResults.size) { cprint('warn', 'Aucun résultat à exporter (lance un check).'); return; }
+  const rows = ['pseudo,statut,detail'];
+  for (const v of allResults.values()) rows.push(`${v.name},${v.state},"${(v.detail || '').replace(/"/g, '""')}"`);
+  const stamp = new Date().toISOString().slice(0, 10);
+  const r = await window.api.saveTxt({ suggested: `resultats-${allResults.size}-${stamp}.csv`, content: rows.join('\n') + '\n' });
+  if (r.canceled) return;
+  if (r.ok) cprint('ok', `${allResults.size} résultats (CSV) → ${r.path}`);
+};
 
 async function exportFree({ auto } = {}) {
   if (!freeList.length) {
@@ -175,27 +217,49 @@ async function exportFree({ auto } = {}) {
     return;
   }
   const stamp = new Date().toISOString().slice(0, 10);
-  const r = await window.api.saveTxt({
-    suggested: `pseudos-libres-${freeList.length}-${stamp}.txt`,
-    content: freeList.join('\n') + '\n',
-  });
-  if (r.canceled) { cprint('info', `Enregistrement annulé (${freeList.length} pseudos libres gardés — bouton "export free" dispo).`); return; }
+  const r = await window.api.saveTxt({ suggested: `pseudos-libres-${freeList.length}-${stamp}.txt`, content: freeList.join('\n') + '\n' });
+  if (r.canceled) { cprint('info', `Enregistrement annulé (${freeList.length} libres gardés — bouton EXPORT LIBRES dispo).`); return; }
   if (r.ok) cprint('ok', `${freeList.length} pseudos libres → ${r.path}`);
   else cprint('err', 'Export: ' + (r.error || 'échec'));
 }
 
 window.api.onBulkResult((r) => {
-  const map = { free: 'free', taken: 'taken', invalid: 'invalid', error: 'err' };
-  const tag = { free: '[LIBRE]', taken: '[PRIS] ', invalid: '[INVAL]', error: '[ERR]  ' }[r.state] || '';
-  cprint(map[r.state] || 'info', `${tag} ${r.name.padEnd(16)} ${r.detail || ''}`);
+  const cls = { free: 'free', taken: 'taken', error: 'err' }[r.state] || 'info';
+  const tag = { free: '[LIBRE]', taken: '[PRIS] ', error: '[ERR]  ' }[r.state] || '';
+  cprint(cls, `${tag} ${r.name.padEnd(16)} ${r.detail || ''}`);
+  allResults.set(r.name.toLowerCase(), { name: r.name, state: r.state, detail: r.detail || '' });
   if (r.state === 'free') freeList.push(r.name);
-  const pct = r.total ? Math.round(((r.index + 1) / r.total) * 100) : 0;
-  $('bulkBar').style.width = pct + '%';
+  if (r.total) $('bulkBar').style.width = Math.round((r.done / r.total) * 100) + '%';
+  if (allResults.size % 25 === 0) saveCheckpoint();
 });
+window.api.onBulkStats((s) => {
+  const eta = s.etaMs != null ? fmtDur(s.etaMs) : '—';
+  const rate = s.rate ? s.rate.toFixed(1) : '0';
+  $('bulkEta').innerHTML = `${s.done}/${s.total} · ${rate}/s · ETA ${eta} · cadence ~${Math.round(1000 / Math.max(1, s.intervalMs))}/s${s.throttled ? ' · <span class="warn">↓ throttle</span>' : ''}`;
+});
+
+function saveCheckpoint() {
+  try { localStorage.setItem('bulkCheckpoint', JSON.stringify({ names: lastNames, results: [...allResults.values()], ts: Date.now() })); } catch { /* quota */ }
+}
+function loadCheckpoint() {
+  try {
+    const d = JSON.parse(localStorage.getItem('bulkCheckpoint') || 'null');
+    if (!d || !Array.isArray(d.names) || !d.names.length) return;
+    lastNames = d.names;
+    allResults = new Map((d.results || []).map((v) => [v.name.toLowerCase(), v]));
+    freeList = (d.results || []).filter((v) => v.state === 'free').map((v) => v.name);
+    const remaining = lastNames.filter((n) => !allResults.has(n.toLowerCase()));
+    if (remaining.length && remaining.length < lastNames.length) {
+      $('resumeBtn').classList.remove('hidden');
+      cprint('info', `Check précédent interrompu : ${remaining.length}/${lastNames.length} restants — bouton REPRENDRE dispo.`);
+    }
+  } catch { /* ignore */ }
+}
 
 function setBulkRunning(on) {
   $('bulkBtn').classList.toggle('hidden', on);
   $('bulkStopBtn').classList.toggle('hidden', !on);
+  if (on) $('resumeBtn').classList.add('hidden');
 }
 
 // ----- Check 1 pseudo -----
@@ -251,6 +315,7 @@ $('snipeBtn').onclick = async () => {
     leadMs: Number($('lead').value),
     connections: Number($('connections').value),
     skipNtp: $('skipNtp').checked,
+    allAccounts: $('allAccounts').checked,
   };
   if (mode === 'at') {
     const ms = new Date($('snipeAt').value).getTime();
@@ -268,6 +333,7 @@ $('snipeBtn').onclick = async () => {
   setSnipeRunning(false);
   clearInterval(countdownTimer); $('countdown').textContent = '';
   if (!r.ok) cprint('err', 'Snipe: ' + r.error);
+  else if (r.multi) cprint(r.winner ? 'ok' : 'warn', r.winner ? `🎯 ${r.winner} a obtenu ${name} !` : `Aucun des ${r.count} comptes n'a eu ${name}.`);
   refreshAccount();
 };
 function parseDuration(s) {
@@ -305,7 +371,46 @@ window.api.onUpdateStatus((s) => {
 });
 window.api.onUpdateProgress((p) => { $('updateProgress').classList.remove('hidden'); $('updateBar').style.width = (p.pct || 0) + '%'; });
 
+// ----- Comptes (multi) -----
+async function refreshAccounts() {
+  const r = await window.api.accountsList();
+  if (!r.ok) return;
+  const sel = $('acctSelect');
+  sel.innerHTML = '<option value="">— comptes —</option>' +
+    r.accounts.map((a) => `<option value="${a.id}"${a.active ? ' selected' : ''}>${esc(a.label)}${a.name ? ` (${esc(a.name)})` : ''}</option>`).join('');
+}
+$('acctSaveBtn').onclick = async () => {
+  const r = await window.api.accountSave($('acctLabel').value.trim());
+  if (!r.ok) { cprint('err', 'Compte: ' + r.error); return; }
+  $('acctLabel').value = ''; cprint('ok', 'Compte enregistré.'); refreshAccounts();
+};
+$('acctUseBtn').onclick = async () => {
+  const id = $('acctSelect').value; if (!id) return;
+  cprint('step', 'Bascule de compte…');
+  const r = await window.api.accountActivate(id);
+  if (!r.ok) { cprint('err', 'Switch: ' + r.error); return; }
+  cprint('ok', 'Compte actif changé.'); refreshAccount(); refreshAccounts();
+};
+$('acctDelBtn').onclick = async () => {
+  const id = $('acctSelect').value; if (!id) return;
+  const r = await window.api.accountRemove(id);
+  if (r.ok) { cprint('info', 'Compte supprimé.'); refreshAccounts(); }
+};
+
+// ----- Cooldown de renommage -----
+$('cooldownBtn').onclick = async () => {
+  $('cooldownInfo').textContent = 'lecture…';
+  const r = await window.api.nameChangeInfo();
+  if (!r.ok) { $('cooldownInfo').innerHTML = `<span class="bad">${esc(r.error)}</span>`; return; }
+  if (r.allowed) { $('cooldownInfo').innerHTML = '<span class="ok">✔ changement autorisé maintenant</span>'; }
+  else if (r.availableAt) {
+    $('cooldownInfo').innerHTML = `<span class="warn">✗ prochain dans ${esc(fmtDur(r.availableAt - Date.now()))}</span> (${new Date(r.availableAt).toLocaleDateString('fr-FR')})`;
+  } else { $('cooldownInfo').innerHTML = '<span class="muted">statut indéterminé</span>'; }
+};
+
 // ----- Init -----
 refreshAccount();
+refreshAccounts();
 updateBulkCount();
+loadCheckpoint();
 cprint('step', 'Minecraft Sniper prêt. Colle un token ou connecte-toi (MS).');

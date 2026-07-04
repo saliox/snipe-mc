@@ -26,12 +26,14 @@ loadEnv();
 import { bus } from '../src/util.js';
 import { loginInteractive, cachedProfile } from '../src/auth.js';
 import { isNameFree, nameStatus, validName } from '../src/mojang.js';
-import { changeName } from '../src/nameapi.js';
+import { changeName, nameChangeInfo } from '../src/nameapi.js';
 import { snipe, requestStop } from '../src/sniper.js';
 import { bestOffset } from '../src/ntp.js';
 import { bulkCheck } from '../src/bulk.js';
 import { generateNames, spaceSize } from '../src/generate.js';
+import { makeProxyPool } from '../src/proxy.js';
 import { setManualToken, clearManualToken, manualStatus, getActiveToken, tryGetActiveToken } from './session.js';
+import { listAccounts, saveCurrentAsAccount, activateAccount, removeAccount, allTokens } from './accounts.js';
 import { initUpdater, checkForUpdates, applyUpdate } from './updater.js';
 
 let win;
@@ -97,6 +99,12 @@ ipcMain.handle('token-set', async (_e, token) => {
 
 ipcMain.handle('token-clear', () => { clearManualToken(); return { ok: true }; });
 
+// --- Multi-comptes ---
+ipcMain.handle('accounts-list', () => { try { return { ok: true, ...listAccounts() }; } catch (e) { return { ok: false, error: e.message }; } });
+ipcMain.handle('account-save', async (_e, label) => { try { return { ok: true, ...(await saveCurrentAsAccount(label)) }; } catch (e) { return { ok: false, error: e.message }; } });
+ipcMain.handle('account-activate', async (_e, id) => { try { return { ok: true, ...(await activateAccount(id)) }; } catch (e) { return { ok: false, error: e.message }; } });
+ipcMain.handle('account-remove', (_e, id) => { try { return { ok: true, ...removeAccount(id) }; } catch (e) { return { ok: false, error: e.message }; } });
+
 ipcMain.handle('login', async () => {
   try {
     const mc = await loginInteractive((prompt) => {
@@ -116,6 +124,15 @@ ipcMain.handle('change-username', async (_e, name) => {
     const res = await changeName(name, active.accessToken);
     if (res.ok) { bus?.emit?.('log', { level: 'ok', msg: `Pseudo changé en ${res.name} !`, t: Date.now() }); }
     return { ok: res.ok, status: res.status, reason: res.reason, name: res.name };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+
+// Cooldown de renommage (30 j) du compte actif.
+ipcMain.handle('namechange-info', async () => {
+  try {
+    const active = await tryGetActiveToken();
+    if (!active) return { ok: false, error: 'Aucun token actif.' };
+    return { ok: true, ...(await nameChangeInfo(active.accessToken)) };
   } catch (e) { return { ok: false, error: e.message }; }
 });
 
@@ -173,19 +190,24 @@ ipcMain.handle('save-txt', async (_e, { suggested, content }) => {
 });
 
 // --- Check en masse ---
-ipcMain.handle('bulk-check', async (_e, { names, delayMs, useToken }) => {
+ipcMain.handle('bulk-check', async (_e, { names, delayMs, useToken, proxies }) => {
   bulkStop = false;
+  const proxyPool = (proxies && proxies.length) ? makeProxyPool(proxies) : null;
   try {
     let token = null;
     if (useToken) { const a = await tryGetActiveToken(); token = a?.accessToken || null; }
+    const send = (ch, d) => { if (win && !win.isDestroyed()) win.webContents.send(ch, d); };
     const summary = await bulkCheck(names, {
-      delayMs: Number(delayMs) || 200,
-      token,
-      onResult: (r) => { if (win && !win.isDestroyed()) win.webContents.send('bulk-result', r); },
+      minIntervalMs: Number(delayMs) || 0,
+      token, proxyPool,
+      onResult: (r) => send('bulk-result', r),
+      onStats: (s) => send('bulk-stats', s),
       shouldStop: () => bulkStop,
     });
+    if (proxyPool) summary.proxies = proxyPool.size;
     return { ok: true, summary };
   } catch (e) { return { ok: false, error: e.message }; }
+  finally { if (proxyPool) await proxyPool.close(); }
 });
 ipcMain.handle('bulk-stop', () => { bulkStop = true; return { ok: true }; });
 
@@ -193,14 +215,8 @@ ipcMain.handle('bulk-stop', () => { bulkStop = true; return { ok: true }; });
 ipcMain.handle('snipe', async (_e, opts) => {
   try {
     if (!validName(opts.name)) return { ok: false, error: 'Pseudo invalide (3-16 car., [A-Za-z0-9_]).' };
-    const active = await tryGetActiveToken();
-    if (!active) return { ok: false, error: 'Aucun token : colle un bearer token ou connecte-toi (MS).' };
-    if (active.source === 'microsoft' && !active.profile) {
-      return { ok: false, error: "Ce compte n'a pas de profil Java." };
-    }
-    const result = await snipe({
+    const common = {
       name: opts.name,
-      token: active.accessToken,
       dropAt: opts.dropAt || undefined,
       monitor: !!opts.monitor,
       burst: opts.burst,
@@ -208,7 +224,28 @@ ipcMain.handle('snipe', async (_e, opts) => {
       leadMs: opts.leadMs,
       connections: opts.connections,
       skipNtp: !!opts.skipNtp,
-    });
+    };
+
+    // Multi-comptes : tire depuis tous les comptes enregistrés en parallèle.
+    if (opts.allAccounts) {
+      const accts = allTokens();
+      if (!accts.length) return { ok: false, error: 'Aucun compte enregistré (enregistre des comptes d\'abord).' };
+      bus?.emit?.('log', { level: 'step', msg: `Snipe multi-comptes : ${accts.length} comptes`, t: Date.now() });
+      const runs = accts.map((a) =>
+        snipe({ ...common, token: a.token })
+          .then((r) => ({ label: a.label || a.name, success: !!r.success }))
+          .catch((e) => ({ label: a.label || a.name, success: false, error: e.message })));
+      const results = await Promise.all(runs);
+      const winner = results.find((x) => x.success) || null;
+      return { ok: true, multi: true, count: accts.length, winner: winner ? winner.label : null, results };
+    }
+
+    const active = await tryGetActiveToken();
+    if (!active) return { ok: false, error: 'Aucun token : colle un bearer token ou connecte-toi (MS).' };
+    if (active.source === 'microsoft' && !active.profile) {
+      return { ok: false, error: "Ce compte n'a pas de profil Java." };
+    }
+    const result = await snipe({ ...common, token: active.accessToken });
     return { ok: true, result };
   } catch (e) { return { ok: false, error: e.message }; }
 });

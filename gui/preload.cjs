@@ -12,8 +12,15 @@ contextBridge.exposeInMainWorld('api', {
   tokenSet: (token) => ipcRenderer.invoke('token-set', token),
   tokenClear: () => ipcRenderer.invoke('token-clear'),
 
+  // Multi-comptes
+  accountsList: () => ipcRenderer.invoke('accounts-list'),
+  accountSave: (label) => ipcRenderer.invoke('account-save', label),
+  accountRemove: (id) => ipcRenderer.invoke('account-remove', id),
+  accountActivate: (id) => ipcRenderer.invoke('account-activate', id),
+
   check: (name) => ipcRenderer.invoke('check', name),
   changeUsername: (name) => ipcRenderer.invoke('change-username', name),
+  nameChangeInfo: () => ipcRenderer.invoke('namechange-info'),
   ntp: () => ipcRenderer.invoke('ntp'),
 
   generate: (opts) => ipcRenderer.invoke('generate', opts),
@@ -30,4 +37,5 @@ contextBridge.exposeInMainWorld('api', {
   onUpdateStatus: (cb) => ipcRenderer.on('update-status', (_e, data) => cb(data)),
   onUpdateProgress: (cb) => ipcRenderer.on('update-progress', (_e, data) => cb(data)),
   onBulkResult: (cb) => ipcRenderer.on('bulk-result', (_e, data) => cb(data)),
+  onBulkStats: (cb) => ipcRenderer.on('bulk-stats', (_e, data) => cb(data)),
 });
