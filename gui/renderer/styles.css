@@ -33,6 +33,21 @@ body {
   opacity: .5;
 }
 
+/* Barre de titre custom (thème terminal), draggable ; les contrôles natifs
+   (min/max/close) sont dessinés à droite par titleBarOverlay, mêmes couleurs. */
+.titlebar {
+  position: sticky; top: 0; z-index: 100;
+  height: 40px; display: flex; align-items: center; gap: 9px;
+  padding: 0 14px;
+  background: #0a0e0a;
+  border-bottom: 1px solid var(--border);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+.tb-logo { width: 22px; height: 22px; -webkit-app-region: no-drag; filter: drop-shadow(0 0 4px rgba(57,255,20,.5)); }
+.tb-title { color: var(--green); font-weight: 700; letter-spacing: 3px; font-size: 12.5px; text-shadow: 0 0 8px rgba(57,255,20,.5); }
+.tb-fill { flex: 1; }
+
 .term-head { padding: 14px 18px 6px; }
 .banner {
   margin: 0;

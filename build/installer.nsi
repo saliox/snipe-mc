@@ -42,8 +42,11 @@ VIAddVersionKey "LegalCopyright" "${PUBLISHER}"
 !insertmacro GetSize
 
 !define MUI_ABORTWARNING
-!define MUI_ICON "${NSISDIR}\Contrib\Graphics\Icons\modern-install-full.ico"
-!define MUI_UNICON "${NSISDIR}\Contrib\Graphics\Icons\modern-uninstall-full.ico"
+!ifndef APP_ICON
+  !define APP_ICON "${NSISDIR}\Contrib\Graphics\Icons\modern-install-full.ico"
+!endif
+!define MUI_ICON "${APP_ICON}"
+!define MUI_UNICON "${APP_ICON}"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\${APP_EXE}"
 !define MUI_FINISHPAGE_RUN_TEXT "Lancer ${APP_NAME}"
 

@@ -1,5 +1,5 @@
 // Processus principal Electron. Fait le pont entre l'UI et le moteur de snipe.
-import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, dialog, nativeImage } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -39,22 +39,44 @@ import { initUpdater, checkForUpdates, applyUpdate } from './updater.js';
 let win;
 let bulkStop = false;
 
+const ICON = path.join(__dirname, '..', 'build', 'icon.png');
+
 function createWindow() {
   win = new BrowserWindow({
-    width: 1000,
-    height: 760,
-    minWidth: 780,
-    minHeight: 580,
+    width: 1280,
+    height: 840,
+    minWidth: 900,
+    minHeight: 620,
     title: 'Minecraft Sniper',
     backgroundColor: '#05070a',
+    show: false,
     autoHideMenuBar: true,
+    icon: fs.existsSync(ICON) ? nativeImage.createFromPath(ICON) : undefined,
+    // Barre de titre thématisée : caption masquée + contrôles natifs recolorés.
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: '#0a0e0a', symbolColor: '#39ff14', height: 40 },
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,           // durcissement : renderer en bac à sable
+      spellcheck: false,
     },
   });
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+
+  // Ouvre en grande fenêtre maximisée (l'app paraissait minuscule au démarrage).
+  win.once('ready-to-show', () => { win.maximize(); win.show(); });
+
+  // Sécurité : aucune navigation hors de l'app, aucune fenêtre enfant ;
+  // les liens externes s'ouvrent dans le navigateur système.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url).catch(() => {});
+    return { action: 'deny' };
+  });
+  win.webContents.on('will-navigate', (e, url) => {
+    if (!url.startsWith('file://')) e.preventDefault();
+  });
 
   bus.on('log', (e) => { if (win && !win.isDestroyed()) win.webContents.send('log', e); });
 

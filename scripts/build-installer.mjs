@@ -76,12 +76,14 @@ console.log('makensis :', makensis);
 
 // 3. Compiler. spawn en tableau d'args -> pas de re-découpage des espaces par le shell.
 fs.rmSync(outFile, { force: true });
+const iconPath = path.join(root, 'build', 'icon.ico');
 const args = [
   `/DAPP_VERSION=${version}`,
   `/DSRC_DIR=${portableDir}`,
   `/DOUT_FILE=${outFile}`,
-  nsi,
 ];
+if (fs.existsSync(iconPath)) args.push(`/DAPP_ICON=${iconPath}`);
+args.push(nsi);
 const res = spawnSync(makensis, args, { stdio: 'inherit' });
 if (res.status !== 0) { console.error('Échec de la compilation NSIS.'); process.exit(res.status || 1); }
 
