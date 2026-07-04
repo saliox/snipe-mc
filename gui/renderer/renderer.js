@@ -170,9 +170,10 @@ $('loadProxyBtn').onclick = async () => {
   $('proxyCount').textContent = `${r.names.length} proxies`;
 };
 
+// names = pseudos à traiter ce run (peut être un sous-ensemble en cas de reprise).
+// lastNames (la liste complète suivie) est géré par les appelants, PAS ici.
 async function runBulk(names) {
   if (!names.length) { cprint('warn', 'Liste vide.'); return; }
-  lastNames = names;
   setBulkRunning(true);
   $('bulkBar').style.width = '0%';
   $('bulkProgress').classList.remove('hidden');
@@ -189,13 +190,20 @@ async function runBulk(names) {
   await exportFree({ auto: true });
 }
 
-$('bulkBtn').onclick = () => { freeList = []; allResults = new Map(); runBulk(bulkNamesArray()); };
+$('bulkBtn').onclick = () => {
+  freeList = []; allResults = new Map();
+  lastNames = bulkNamesArray();       // nouvelle liste complète suivie
+  runBulk(lastNames);
+};
 $('bulkStopBtn').onclick = async () => { await window.api.bulkStop(); cprint('warn', 'Arrêt demandé…'); $('resumeBtn').classList.remove('hidden'); };
 $('resumeBtn').onclick = () => {
+  // Recharge visuellement la liste complète + le bon compteur.
+  $('bulkNames').value = lastNames.join('\n');
+  updateBulkCount();
   const remaining = lastNames.filter((n) => !allResults.has(n.toLowerCase()));
-  if (!remaining.length) { cprint('info', 'Rien à reprendre.'); $('resumeBtn').classList.add('hidden'); return; }
+  if (!remaining.length) { cprint('info', 'Rien à reprendre (tout est déjà checké).'); $('resumeBtn').classList.add('hidden'); return; }
   $('resumeBtn').classList.add('hidden');
-  cprint('step', `Reprise : ${remaining.length} pseudos restants`);
+  cprint('step', `Reprise : ${remaining.length} restants sur ${lastNames.length}`);
   runBulk(remaining);
 };
 
@@ -252,8 +260,11 @@ function loadCheckpoint() {
     freeList = (d.results || []).filter((v) => v.state === 'free').map((v) => v.name);
     const remaining = lastNames.filter((n) => !allResults.has(n.toLowerCase()));
     if (remaining.length && remaining.length < lastNames.length) {
+      // Recharge la liste complète à l'écran + remet le bon compteur.
+      $('bulkNames').value = lastNames.join('\n');
+      updateBulkCount();
       $('resumeBtn').classList.remove('hidden');
-      cprint('info', `Check précédent interrompu : ${remaining.length}/${lastNames.length} restants — bouton REPRENDRE dispo.`);
+      cprint('info', `Check précédent interrompu : ${remaining.length}/${lastNames.length} restants — liste rechargée, bouton REPRENDRE dispo.`);
     }
   } catch { /* ignore */ }
 }
