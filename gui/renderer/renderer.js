@@ -271,7 +271,7 @@ $('checkBtn').onclick = async () => {
   if (!r.ok) { $('checkResult').innerHTML = `<span class="bad">${esc(r.error)}</span>`; return; }
   let html = '', logmsg = '';
   if (r.public?.free === true) { html = '<span class="ok">LIBRE</span>'; logmsg = `${name} : LIBRE`; }
-  else if (r.public?.free === false) { html = `<span class="bad">PRIS</span> par ${esc(r.public.name)}`; logmsg = `${name} : PRIS par ${r.public.name}`; }
+  else if (r.public?.free === false) { html = '<span class="bad">PRIS</span>'; logmsg = `${name} : PRIS`; }
   else if (r.public?.rateLimited) { html = '<span class="warn">Mojang rate-limité</span>'; logmsg = `${name} : rate-limité`; }
   if (r.account) {
     const lbl = { AVAILABLE: '<span class="ok">réclamable</span>', DUPLICATE: '<span class="bad">pris</span>', NOT_ALLOWED: '<span class="warn">bloqué</span>' }[r.account] || r.account;

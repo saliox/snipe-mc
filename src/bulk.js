@@ -116,7 +116,7 @@ export async function bulkCheck(names, opts = {}) {
         onResult({ done: checked, total, name: item.name, state: 'free', detail });
       } else if (res.free === false) {
         taken++; checked++;
-        onResult({ done: checked, total, name: item.name, state: 'taken', detail: `pris par ${res.name}` });
+        onResult({ done: checked, total, name: item.name, state: 'taken', detail: '' });
       } else {
         errors++; checked++;
         onResult({ done: checked, total, name: item.name, state: 'error', detail: `HTTP ${res.statusCode || '?'}` });
