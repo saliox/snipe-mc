@@ -146,6 +146,7 @@ $('genToBulkBtn').onclick = () => {
 let freeList = [];
 let allResults = new Map(); // name.toLowerCase() -> { name, state, detail }
 let lastNames = [];
+let tally = { free: 0, taken: 0, error: 0 }; // cumul (multi-batch / reprise / illimité)
 function bulkNamesArray() { return $('bulkNames').value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean); }
 function proxiesArray() { return $('proxies').value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean); }
 function updateBulkCount() {
@@ -192,7 +193,7 @@ async function runBulk(names, { silent = false } = {}) {
 }
 
 $('bulkBtn').onclick = () => {
-  freeList = []; allResults = new Map();
+  freeList = []; allResults = new Map(); tally = { free: 0, taken: 0, error: 0 };
   lastNames = bulkNamesArray();       // nouvelle liste complète suivie
   runBulk(lastNames);
 };
@@ -237,6 +238,7 @@ window.api.onBulkResult((r) => {
   const tag = { free: '[LIBRE]', taken: '[PRIS] ', error: '[ERR]  ' }[r.state] || '';
   cprint(cls, `${tag} ${r.name.padEnd(16)} ${r.detail || ''}`);
   allResults.set(r.name.toLowerCase(), { name: r.name, state: r.state, detail: r.detail || '' });
+  if (tally[r.state] != null) tally[r.state]++;
   if (r.state === 'free') {
     freeList.push(r.name);
     // Scan illimité : coupe le batch dès que le seuil de libres est atteint.
@@ -249,6 +251,15 @@ window.api.onBulkResult((r) => {
   if (!unlimited && allResults.size % 25 === 0) saveCheckpoint();
 });
 window.api.onBulkStats((s) => {
+  // En illimité, les compteurs du backend sont par-batch : on affiche le CUMUL.
+  if (unlimited) {
+    const secs = (Date.now() - uniStart) / 1000;
+    const orate = secs > 0 ? (allResults.size / secs).toFixed(1) : '0';
+    $('bulkEta').innerHTML = `∞ ${allResults.size} checkés · <span class="free">${tally.free} libres</span> · ` +
+      `<span class="taken">${tally.taken} pris</span> · <span class="err">${tally.error} échecs</span> · ${orate}/s · ${fmtDur(secs * 1000)}` +
+      `${s.throttled ? ' · <span class="warn">↓ throttle</span>' : ''}`;
+    return;
+  }
   const eta = s.etaMs != null ? fmtDur(s.etaMs) : '—';
   const rate = s.rate ? s.rate.toFixed(1) : '0';
   $('bulkEta').innerHTML = `${s.done}/${s.total} · ${rate}/s · ETA ${eta} · cadence ~${Math.round(1000 / Math.max(1, s.intervalMs))}/s` +
@@ -308,14 +319,15 @@ function setUnlimitedRunning(on) {
 function updateUniInfo() {
   const secs = (Date.now() - uniStart) / 1000;
   const rate = secs > 0 ? allResults.size / secs : 0;
-  $('unlimitedInfo').innerHTML = `∞ ${allResults.size} checkés · <span class="free">${freeList.length} libres</span> · ${rate.toFixed(1)}/s · ${fmtDur(secs * 1000)}`;
+  $('unlimitedInfo').innerHTML = `∞ ${allResults.size} checkés · <span class="free">${tally.free} libres</span> · ` +
+    `<span class="taken">${tally.taken} pris</span> · <span class="err">${tally.error} échecs</span> · ${rate.toFixed(1)}/s · ${fmtDur(secs * 1000)}`;
 }
 $('genUnlimitedStopBtn').onclick = () => { unlimited = false; window.api.bulkStop(); cprint('warn', 'Arrêt du scan illimité…'); };
 $('genUnlimitedBtn').onclick = async () => {
   if (unlimited) return;
   unlimited = true;
   unlimitedThreshold = Number($('unlimitedThreshold').value) || 0;
-  freeList = []; allResults = new Map(); lastNames = [];
+  freeList = []; allResults = new Map(); lastNames = []; tally = { free: 0, taken: 0, error: 0 };
   uniStart = Date.now();
   setUnlimitedRunning(true);
   $('bulkProgress').classList.remove('hidden');
