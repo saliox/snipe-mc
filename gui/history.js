@@ -36,7 +36,7 @@ export function flushNow() {
   if (!dirty || !map || writing) return;
   trim();
   const json = JSON.stringify(Object.fromEntries(map));
-  const tmp = FILE() + '.tmp';
+  const tmp = FILE() + '.async.tmp';
   dirty = false; writing = true;
   fs.writeFile(tmp, json, (err) => {
     if (!err) { try { fs.renameSync(tmp, FILE()); } catch { /* ignore */ } }
@@ -45,10 +45,11 @@ export function flushNow() {
   });
 }
 // Écriture SYNCHRONE (fermeture de l'app : garantit la persistance).
+// Temp DISTINCT de flushNow pour éviter toute collision de fichier.
 export function flushSync() {
   if (!map) return;
   trim();
-  try { const tmp = FILE() + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(Object.fromEntries(map))); fs.renameSync(tmp, FILE()); dirty = false; }
+  try { const tmp = FILE() + '.sync.tmp'; fs.writeFileSync(tmp, JSON.stringify(Object.fromEntries(map))); fs.renameSync(tmp, FILE()); dirty = false; }
   catch { /* ignore */ }
 }
 

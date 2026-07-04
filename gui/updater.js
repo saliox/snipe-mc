@@ -97,7 +97,8 @@ async function tryAppOnlyUpdate() {
 
     const dest = path.join(os.tmpdir(), 'snipemc-app.zip');
     send('update-status', { state: 'downloading' });
-    await downloadTo({ url: zipAsset.url, size: meta.size, sha256: meta.sha256 || zipAsset.sha256 }, dest, (p) => send('update-progress', p));
+    // Préfère le digest calculé par GitHub (serveur) ; repli sur app-update.json.
+    await downloadTo({ url: zipAsset.url, size: meta.size, sha256: zipAsset.sha256 || meta.sha256 }, dest, (p) => send('update-progress', p));
     send('update-status', { state: 'installing' });
     applyAppZip(dest, meta.version || lastInfo.version);
     return true;
