@@ -148,10 +148,14 @@ async function monitorTick() {
   try {
     for (const name of watchlist.getWatch()) {
       if (!monitor.on) break;
-      if (monitor.notified.has(name.toLowerCase())) continue;
       let res; try { res = await isNameFree(name); } catch { res = null; }
-      if (res && res.free === true) {
-        monitor.notified.add(name.toLowerCase());
+      const key = name.toLowerCase();
+      // Repris depuis la dernière notif → on réarme pour re-notifier au prochain
+      // drop (sinon un pseudo notifié une fois n'alerte plus jamais).
+      if (res && res.free === false) monitor.notified.delete(key);
+      // Notifie UNE fois par passage à « libre » (pas de spam tant qu'il le reste).
+      if (res && res.free === true && !monitor.notified.has(key)) {
+        monitor.notified.add(key);
         notifyFree(name);
         void sendWebhook({ title: '🎯 Pseudo libre !', description: `**${name}** est disponible — réclame vite (cooldown 30 j).` });
         bus.emit('log', { level: 'free', msg: `★ WATCHLIST : ${name} est LIBRE !`, t: Date.now() });
