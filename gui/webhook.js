@@ -21,9 +21,9 @@ function load() { return loadEncrypted(FILE()) || {}; }
 export function getWebhookPublic() {
   const c = load();
   const url = c.url || '';
-  let hint = '';
-  if (url) { const m = url.match(/webhooks\/(\d+)\//); hint = m ? `webhook #${m[1].slice(0, 6)}…` : 'configuré'; }
-  return { configured: !!url, enabled: !!c.enabled, hint };
+  // On ne renvoie AUCUN fragment d'URL au renderer (cf. en-tête du module) : juste
+  // un état. `configured` suffit à l'UI pour afficher « configuré ».
+  return { configured: !!url, enabled: !!c.enabled, hint: url ? 'configuré' : '' };
 }
 
 // Enregistre. Une URL vide conserve l'URL existante (permet de (dé)cocher le
@@ -55,6 +55,17 @@ export async function sendWebhook({ title, description, color = GREEN }, overrid
     await body.dump();
     return { ok: statusCode >= 200 && statusCode < 300, status: statusCode };
   } catch (e) { return { ok: false, error: e.message }; }
+}
+
+// Test manuel : utilise l'URL fournie (test AVANT enregistrement) ou, à défaut,
+// l'URL déjà enregistrée. Court-circuite toujours la vérif « activé » — un test
+// explicite doit fonctionner même si les alertes sont décochées, et même quand le
+// champ de saisie est vide après un enregistrement.
+export async function testWebhook(overrideUrl) {
+  const url = (overrideUrl && String(overrideUrl).trim()) || load().url || '';
+  if (!url) return { ok: false, error: 'aucun webhook configuré' };
+  // On passe une URL non vide comme `override` → sendWebhook ignore le flag « activé ».
+  return sendWebhook({ title: '✅ Test Snipe MC', description: 'Les alertes Discord fonctionnent — tu seras prévenu quand un pseudo surveillé se libère.' }, url);
 }
 
 export { GREEN, BLURPLE };

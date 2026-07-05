@@ -38,7 +38,7 @@ import { makeProxyPool, testProxies } from '../src/proxy.js';
 import { setManualToken, clearManualToken, manualStatus, getActiveToken, tryGetActiveToken } from './session.js';
 import { listAccounts, saveCurrentAsAccount, activateAccount, removeAccount, allTokens } from './accounts.js';
 import * as history from './history.js';
-import { getWebhookPublic, setWebhook, sendWebhook, BLURPLE } from './webhook.js';
+import { getWebhookPublic, setWebhook, sendWebhook, testWebhook, BLURPLE } from './webhook.js';
 import { initUpdater, checkForUpdates, applyUpdate } from './updater.js';
 
 let win;
@@ -147,17 +147,27 @@ async function monitorTick() {
   try {
     for (const name of watchlist.getWatch()) {
       if (!monitor.on) break;
-      if (monitor.notified.has(name.toLowerCase())) continue;
+      const key = name.toLowerCase();
+      const alreadyNotified = monitor.notified.has(key);
+      // Déjà notifié ET pas d'auto-claim → plus rien à faire (évite un appel API inutile).
+      // Si l'auto-claim est actif, on RE-vérifie : un claim qui a échoué de façon
+      // transitoire (réseau/429/token) doit pouvoir réessayer au tick suivant tant
+      // que le pseudo est libre — sinon on l'abandonnerait au pire moment.
+      if (alreadyNotified && !monitor.autoclaim) continue;
       let res; try { res = await isNameFree(name); } catch { res = null; }
       if (res && res.free === true) {
-        monitor.notified.add(name.toLowerCase());
-        notifyFree(name);
-        void sendWebhook({ title: '🎯 Pseudo libre !', description: `**${name}** est disponible — réclame vite (cooldown 30 j).` });
-        bus.emit('log', { level: 'free', msg: `★ WATCHLIST : ${name} est LIBRE !`, t: Date.now() });
-        if (win && !win.isDestroyed()) win.webContents.send('watch-free', { name });
+        if (!alreadyNotified) {
+          // Notification / webhook / log : une seule fois par libération.
+          monitor.notified.add(key);
+          notifyFree(name);
+          void sendWebhook({ title: '🎯 Pseudo libre !', description: `**${name}** est disponible — réclame vite (cooldown 30 j).` });
+          bus.emit('log', { level: 'free', msg: `★ WATCHLIST : ${name} est LIBRE !`, t: Date.now() });
+          if (win && !win.isDestroyed()) win.webContents.send('watch-free', { name });
+        }
         if (monitor.autoclaim) {
           // Garde individuelle : un échec de claim (réseau/401/…) ne doit pas
-          // avorter tout le tick ni sauter le reste de la watchlist.
+          // avorter tout le tick ni sauter le reste de la watchlist ; le pseudo
+          // reste éligible au prochain tick tant qu'il est libre.
           try {
             const active = await tryGetActiveToken();
             if (active) {
@@ -336,6 +346,9 @@ ipcMain.handle('checkpoint-save', async (_e, data) => {
 ipcMain.handle('checkpoint-save-raw', async (_e, str) => {
   try {
     if (typeof str !== 'string') return { ok: false, error: 'payload non-string' };
+    // Valide que c'est bien du JSON AVANT d'écraser le checkpoint : sinon un
+    // écrit corrompu ferait échouer silencieusement checkpoint-load (data:null).
+    try { JSON.parse(str); } catch { return { ok: false, error: 'payload JSON invalide' }; }
     const tmp = `${CHECKPOINT_FILE()}.${Date.now()}.tmp`;
     await fs.promises.writeFile(tmp, str);
     await fs.promises.rename(tmp, CHECKPOINT_FILE());
@@ -362,7 +375,8 @@ ipcMain.handle('monitor-autoclaim', (_e, v) => { monitor.autoclaim = !!v; return
 ipcMain.handle('webhook-get', () => { try { return { ok: true, ...getWebhookPublic() }; } catch (e) { return { ok: false, error: e.message }; } });
 ipcMain.handle('webhook-set', (_e, p) => { try { return { ok: true, ...setWebhook(p?.url, p?.enabled) }; } catch (e) { return { ok: false, error: e.message }; } });
 ipcMain.handle('webhook-test', async (_e, url) => {
-  try { return await sendWebhook({ title: '✅ Test Snipe MC', description: 'Les alertes Discord fonctionnent — tu seras prévenu quand un pseudo surveillé se libère.' }, url); }
+  // testWebhook gère le champ vide (→ URL enregistrée) et court-circuite le flag « activé ».
+  try { return await testWebhook(url); }
   catch (e) { return { ok: false, error: e.message }; }
 });
 
