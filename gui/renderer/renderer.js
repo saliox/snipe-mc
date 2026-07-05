@@ -726,6 +726,15 @@ $('histClearBtn').onclick = async () => {
   refreshHistStats();
 };
 
+// ----- Raccourci : Échap = stopper le scan/snipe en cours (clique le STOP visible) -----
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  for (const id of ['bulkStopBtn', 'genUnlimitedStopBtn', 'snipeStopBtn']) {
+    const b = $(id);
+    if (b && !b.classList.contains('hidden')) { b.click(); break; }
+  }
+});
+
 // ----- NTP -----
 $('ntpBtn').onclick = async () => {
   $('ntpInfo').textContent = 'mesure…';
