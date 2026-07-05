@@ -319,6 +319,14 @@ $('freeChips').onclick = (e) => {
   const chip = e.target.closest('.chip');
   if (chip) claimName(chip.dataset.name);
 };
+// Clic droit = copier ce pseudo (action sûre, sans réclamer).
+$('freeChips').addEventListener('contextmenu', async (e) => {
+  const chip = e.target.closest('.chip');
+  if (!chip) return;
+  e.preventDefault();
+  const r = await window.api.clipboardWrite(chip.dataset.name);
+  cprint(r && r.ok ? 'ok' : 'err', r && r.ok ? `${chip.dataset.name} copié.` : 'Copie échouée.');
+});
 $('claimBestBtn').onclick = () => { const d = displayedFree(); if (d[0]) claimName(d[0].name); };
 $('gemsOnly').onchange = refreshFreeView;
 $('gemTier').onchange = refreshFreeView;
