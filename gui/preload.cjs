@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('api', {
   ntp: () => ipcRenderer.invoke('ntp'),
 
   generate: (opts) => ipcRenderer.invoke('generate', opts),
+  variants: (base) => ipcRenderer.invoke('variants', base),
   rankNames: (names) => ipcRenderer.invoke('rank-names', names),
   historyStats: () => ipcRenderer.invoke('history-stats'),
   historyLookup: (name) => ipcRenderer.invoke('history-lookup', name),

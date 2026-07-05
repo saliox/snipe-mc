@@ -173,3 +173,37 @@ export function spaceSize(length, charset = 'alpha') {
 // Le dictionnaire embarqué sert aussi au score de désirabilité.
 const DICT_SET = new Set(DICT);
 export function isDictWord(s) { return DICT_SET.has(String(s).toLowerCase()); }
+
+// Variantes proches d'un pseudo cible : quand la cible est prise, propose des
+// alternatives crédibles à checker (underscores, doublage, suffixes/préfixes
+// courts, voyelle doublée, leet, voyelle interne retirée). Renvoie des noms
+// VALIDES (3-16, [a-z0-9_]), dédupliqués, sans la cible elle-même.
+const LEET = { a: '4', e: '3', i: '1', o: '0', s: '5', t: '7', b: '8', g: '9', l: '1', z: '2' };
+export function nameVariants(base, { max = 80 } = {}) {
+  const b = String(base || '').trim().toLowerCase();
+  if (!/^[a-z0-9_]{1,16}$/.test(b)) return [];
+  const out = new Set();
+  const add = (s) => { if (s !== b && /^[a-z0-9_]{3,16}$/.test(s)) out.add(s); };
+
+  // Underscores
+  add('_' + b); add(b + '_'); add('_' + b + '_');
+  // Doublage de lettres (dernière, première)
+  add(b + b[b.length - 1]); add(b[0] + b);
+  // Suffixes / préfixes courts
+  for (const s of ['x', 'z', 'o', 's', '_']) { add(b + s); add(s + b); }
+  // Voyelle doublée (1re voyelle rencontrée)
+  const vi = b.search(/[aeiou]/);
+  if (vi >= 0) add(b.slice(0, vi + 1) + b[vi] + b.slice(vi + 1));
+  // Leet : une substitution position par position, puis version entièrement leetée
+  const chars = b.split('');
+  for (let i = 0; i < chars.length; i++) {
+    const r = LEET[chars[i]];
+    if (r) { const cp = chars.slice(); cp[i] = r; add(cp.join('')); }
+  }
+  add(chars.map((c) => LEET[c] || c).join(''));
+  // Suppression d'une voyelle interne (styles "Alx", "Jmes")
+  for (let i = 1; i < b.length - 1; i++) {
+    if (/[aeiou]/.test(b[i])) add(b.slice(0, i) + b.slice(i + 1));
+  }
+  return [...out].slice(0, max);
+}

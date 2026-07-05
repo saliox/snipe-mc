@@ -599,6 +599,23 @@ $('checkBtn').onclick = async () => {
   refreshHistStats();
 };
 
+// ----- Variantes (alternatives quand la cible est prise) -----
+async function runVariants() {
+  const base = $('variantBase').value.trim();
+  if (!base) { $('variantInfo').textContent = 'indique un pseudo cible'; return; }
+  const r = await window.api.variants(base);
+  if (!r.ok) { $('variantInfo').innerHTML = `<span class="bad">${esc(r.error)}</span>`; return; }
+  if (!r.names.length) { $('variantInfo').innerHTML = '<span class="muted">aucune variante valide (3-16, [a-z0-9_])</span>'; return; }
+  // Injecte dans BULK et lance le check : réutilise progression + chips + claim.
+  $('bulkNames').value = r.names.join('\n');
+  updateBulkCount();
+  $('variantInfo').innerHTML = `<span class="ok">${r.names.length}</span> variantes → BULK (check lancé)`;
+  cprint('step', `Variantes de « ${esc(base)} » : ${r.names.length} candidates → check`);
+  $('bulkBtn').click();
+}
+$('variantBtn').onclick = runVariants;
+$('variantBase').addEventListener('keydown', (e) => { if (e.key === 'Enter') runVariants(); });
+
 // ----- Historique -----
 async function refreshHistStats() {
   const r = await window.api.historyStats();

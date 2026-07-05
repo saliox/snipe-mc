@@ -32,7 +32,7 @@ import { changeName, nameChangeInfo } from '../src/nameapi.js';
 import { snipe, requestStop } from '../src/sniper.js';
 import { bestOffset } from '../src/ntp.js';
 import { bulkCheck } from '../src/bulk.js';
-import { generateNames, spaceSize } from '../src/generate.js';
+import { generateNames, spaceSize, nameVariants } from '../src/generate.js';
 import { rankNames } from '../src/score.js';
 import { makeProxyPool, testProxies } from '../src/proxy.js';
 import { setManualToken, clearManualToken, manualStatus, getActiveToken, tryGetActiveToken } from './session.js';
@@ -390,6 +390,11 @@ ipcMain.handle('generate', (_e, opts) => {
     const names = generateNames(opts);
     return { ok: true, names, space: spaceSize(opts.length, opts.charset) };
   } catch (e) { return { ok: false, error: e.message }; }
+});
+// Variantes proches d'un pseudo (alternatives quand la cible est prise).
+ipcMain.handle('variants', (_e, base) => {
+  try { return { ok: true, names: nameVariants(String(base || '')) }; }
+  catch (e) { return { ok: false, error: e.message }; }
 });
 
 // --- Fichier .txt (liste de pseudos) ---
