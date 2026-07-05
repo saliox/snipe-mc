@@ -28,13 +28,17 @@ $('banner').textContent = renderBanner('MINECRAFT SNIPER');
 
 // ----- Console -----
 const logBox = $('log');
+const MAX_LOG_LINES = 400; // plafond : évite un DOM qui gonfle sans limite en scan ∞
 function cprint(level, msg) {
+  // n'auto-défile que si on est déjà en bas (ne gêne pas la lecture quand on remonte).
+  const atBottom = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight < 40;
   const line = document.createElement('div');
   line.className = 'l';
   const time = new Date().toLocaleTimeString('fr-FR');
   line.innerHTML = `<span class="t">${time}</span><span class="${level}">${esc(msg)}</span>`;
   logBox.appendChild(line);
-  logBox.scrollTop = logBox.scrollHeight;
+  while (logBox.childElementCount > MAX_LOG_LINES) logBox.removeChild(logBox.firstChild);
+  if (atBottom) logBox.scrollTop = logBox.scrollHeight;
 }
 function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 window.api.onLog((e) => cprint(e.level, e.msg));
@@ -365,7 +369,11 @@ async function exportAllFree({ auto } = {}) {
 window.api.onBulkResult((r) => {
   const cls = { free: 'free', taken: 'taken', error: 'err', invalid: 'warn' }[r.state] || 'info';
   const tag = { free: '[LIBRE]', taken: '[PRIS] ', error: '[ERR]  ', invalid: '[INVAL]' }[r.state] || '';
-  cprint(cls, `${tag} ${r.name.padEnd(16)} ${r.detail || ''}`);
+  // En scan ∞ (uniTimer actif), n'affiche que les hits libres + erreurs : inutile de
+  // noyer la console/DOM avec chaque [PRIS]. Les compteurs (tally) restent exacts.
+  if (!uniTimer || r.state === 'free' || r.state === 'error') {
+    cprint(cls, `${tag} ${r.name.padEnd(16)} ${r.detail || ''}`);
+  }
   allResults.set(r.name.toLowerCase(), { name: r.name, state: r.state, detail: r.detail || '' });
   if (tally[r.state] != null) tally[r.state]++;
   if (r.state === 'free') {
