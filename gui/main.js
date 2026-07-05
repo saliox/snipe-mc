@@ -38,6 +38,7 @@ import { makeProxyPool, testProxies } from '../src/proxy.js';
 import { setManualToken, clearManualToken, manualStatus, getActiveToken, tryGetActiveToken } from './session.js';
 import { listAccounts, saveCurrentAsAccount, activateAccount, removeAccount, allTokens } from './accounts.js';
 import * as history from './history.js';
+import { getWebhookPublic, setWebhook, sendWebhook, BLURPLE } from './webhook.js';
 import { initUpdater, checkForUpdates, applyUpdate } from './updater.js';
 
 let win;
@@ -149,6 +150,7 @@ async function monitorTick() {
       if (res && res.free === true) {
         monitor.notified.add(name.toLowerCase());
         notifyFree(name);
+        void sendWebhook({ title: '🎯 Pseudo libre !', description: `**${name}** est disponible — réclame vite (cooldown 30 j).` });
         bus.emit('log', { level: 'free', msg: `★ WATCHLIST : ${name} est LIBRE !`, t: Date.now() });
         if (win && !win.isDestroyed()) win.webContents.send('watch-free', { name });
         if (monitor.autoclaim) {
@@ -161,6 +163,7 @@ async function monitorTick() {
               // (cooldown 30 j → toute autre tentative échouerait). La veille
               // continue pour NOTIFIER sur les autres pseudos.
               try { watchlist.removeWatch(name); } catch { /* ignore */ }
+              void sendWebhook({ title: '🎯 Pseudo auto-réclamé !', description: `**${name}** t'appartient maintenant.`, color: BLURPLE });
               monitor.autoclaim = false;
               if (win && !win.isDestroyed()) {
                 win.webContents.send('watch-free', { name, claimed: true });
@@ -347,6 +350,14 @@ ipcMain.handle('monitor-start', () => { startMonitor(); return { ok: true, on: m
 ipcMain.handle('monitor-stop', () => { stopMonitor(); return { ok: true, on: monitor.on }; });
 ipcMain.handle('monitor-status', () => ({ ok: true, on: monitor.on, autoclaim: monitor.autoclaim }));
 ipcMain.handle('monitor-autoclaim', (_e, v) => { monitor.autoclaim = !!v; return { ok: true, autoclaim: monitor.autoclaim }; });
+
+// --- Alertes Discord (webhook) ---
+ipcMain.handle('webhook-get', () => { try { return { ok: true, ...getWebhookPublic() }; } catch (e) { return { ok: false, error: e.message }; } });
+ipcMain.handle('webhook-set', (_e, p) => { try { return { ok: true, ...setWebhook(p?.url, p?.enabled) }; } catch (e) { return { ok: false, error: e.message }; } });
+ipcMain.handle('webhook-test', async (_e, url) => {
+  try { return await sendWebhook({ title: '✅ Test Snipe MC', description: 'Les alertes Discord fonctionnent — tu seras prévenu quand un pseudo surveillé se libère.' }, url); }
+  catch (e) { return { ok: false, error: e.message }; }
+});
 
 // --- Export / import config (sans les tokens : liés machine + sensibles) ---
 ipcMain.handle('config-export', async (_e, payload) => {

@@ -204,7 +204,14 @@
       </div>
       <label class="chk"><input type="checkbox" id="watchAutoclaim" /> auto-claim dès qu'un se libère (compte actif)</label>
       <div id="watchList" class="chips"></div>
-      <div class="hint">Surveille en fond (même minimisé dans le tray). Notification Windows + son quand un pseudo se libère.</div>
+      <div class="row wrap">
+        <input id="webhookUrl" class="in mono" type="password" placeholder="URL webhook Discord (alertes sur ton téléphone)" autocomplete="off" spellcheck="false" style="flex:1;min-width:0" />
+        <label class="chk"><input type="checkbox" id="webhookEnabled" /> alertes Discord</label>
+        <button id="webhookTestBtn" class="btn tiny">tester</button>
+        <button id="webhookSaveBtn" class="btn tiny ok">enregistrer</button>
+        <span id="webhookStatus" class="status"></span>
+      </div>
+      <div class="hint">Surveille en fond (même minimisé dans le tray). Notification Windows + son quand un pseudo se libère. Avec un <b>webhook Discord</b>, tu es aussi prévenu sur ton téléphone.</div>
     </section>
 
     <!-- SNIPE -->

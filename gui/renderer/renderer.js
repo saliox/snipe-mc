@@ -869,11 +869,47 @@ window.api.onWatchFree(({ name, claimed }) => {
   else cprint('free', `★ WATCHLIST : ${name} est LIBRE !`);
 });
 
+// ----- Alertes Discord (webhook) -----
+async function refreshWebhook() {
+  const r = await window.api.webhookGet();
+  if (!r.ok) return;
+  $('webhookEnabled').checked = r.enabled;
+  $('webhookUrl').placeholder = r.configured
+    ? `${r.hint} configuré — colle une nouvelle URL pour changer`
+    : 'URL webhook Discord (alertes sur ton téléphone)';
+  $('webhookStatus').innerHTML = r.configured
+    ? `<span class="ok">✓ configuré${r.enabled ? '' : ' (désactivé)'}</span>`
+    : '<span class="muted">non configuré</span>';
+}
+$('webhookSaveBtn').onclick = async () => {
+  const url = $('webhookUrl').value.trim();
+  const enabled = $('webhookEnabled').checked;
+  const r = await window.api.webhookSet({ url, enabled });
+  if (!r.ok) { $('webhookStatus').innerHTML = `<span class="bad">✗ ${esc(r.error)}</span>`; return; }
+  $('webhookUrl').value = '';
+  cprint('ok', 'Webhook Discord enregistré.');
+  refreshWebhook();
+};
+// (Dé)cocher sauvegarde tout de suite (l'URL déjà stockée est conservée).
+$('webhookEnabled').onchange = async () => {
+  const r = await window.api.webhookSet({ url: $('webhookUrl').value.trim(), enabled: $('webhookEnabled').checked });
+  if (!r.ok) { $('webhookStatus').innerHTML = `<span class="bad">✗ ${esc(r.error)}</span>`; $('webhookEnabled').checked = false; return; }
+  refreshWebhook();
+};
+$('webhookTestBtn').onclick = async () => {
+  $('webhookStatus').textContent = 'envoi du test…';
+  const r = await window.api.webhookTest($('webhookUrl').value.trim());
+  $('webhookStatus').innerHTML = r.ok
+    ? '<span class="ok">✓ test envoyé — vérifie Discord</span>'
+    : `<span class="bad">✗ ${esc(r.error || ('HTTP ' + r.status))}</span>`;
+};
+
 // ----- Init -----
 refreshAccount();
 refreshAccounts();
 refreshHistStats();
 refreshWatch();
+refreshWebhook();
 window.api.monitorStatus().then((s) => { if (s.ok) { setMonitorUI(s.on); $('watchAutoclaim').checked = !!s.autoclaim; } });
 updateBulkCount();
 loadCheckpoint();
