@@ -1,30 +1,28 @@
 // Auto-update côté Electron (processus principal). S'appuie sur src/updatecore.js
 // pour la logique réseau, et pilote l'UI + le lancement de l'installeur.
 //
-// AUTONOME par défaut : se met à jour depuis les Releases GitHub du dépôt public
-// DEFAULT_REPO, sans aucune config ni serveur. Overrides possibles via .env :
-//   UPDATE_REPO=owner/name        (autre dépôt GitHub)
-//   UPDATE_URL=http://ip:8770/    (flux HTTP local, voir scripts/serve-updates.mjs)
+// AUTONOME : se met à jour depuis les Releases GitHub du dépôt public
+// DEFAULT_REPO, sans aucune config, aucun serveur, aucune adresse IP.
+// Seul override .env : UPDATE_REPO=owner/name (autre dépôt GitHub — jamais une IP).
 import { app } from 'electron';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { isNewer, fetchLatest, fetchLatestGithub, downloadTo, fetchJson } from '../src/updatecore.js';
+import { isNewer, fetchLatestGithub, downloadTo, fetchJson } from '../src/updatecore.js';
 
 const DEFAULT_REPO = 'saliox/snipe-mc';
 
 let getWin = () => null;
-let source = { kind: 'github', repo: DEFAULT_REPO }; // ou { kind:'http', base }
+let source = { repo: DEFAULT_REPO };
 let lastInfo = null;
 let busy = false;
 
 export function initUpdater(winGetter) {
   getWin = winGetter;
-  const feedUrl = process.env.UPDATE_URL && process.env.UPDATE_URL.trim();
   const repo = (process.env.UPDATE_REPO && process.env.UPDATE_REPO.trim()) || DEFAULT_REPO;
-  source = feedUrl ? { kind: 'http', base: feedUrl } : { kind: 'github', repo };
-  console.log(`[update] source: ${source.kind === 'http' ? source.base : 'github:' + source.repo}`);
+  source = { repo };
+  console.log(`[update] source: github:${source.repo}`);
 }
 
 function send(channel, data) {
@@ -37,9 +35,7 @@ function send(channel, data) {
 // remonte que si une MAJ est disponible (vérif de démarrage).
 export async function checkForUpdates({ silent = true } = {}) {
   try {
-    const info = source.kind === 'http'
-      ? await fetchLatest(source.base)
-      : await fetchLatestGithub(source.repo);
+    const info = await fetchLatestGithub(source.repo);
     const current = app.getVersion();
     const available = isNewer(info.version, current);
     lastInfo = info;

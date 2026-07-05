@@ -729,7 +729,6 @@ window.api.onUpdateStatus((s) => {
   else if (s.state === 'downloading') { show('téléchargement…', false); $('updateProgress').classList.remove('hidden'); }
   else if (s.state === 'installing') { show('installation… redémarrage imminent.', false); }
   else if (s.state === 'uptodate') { show(`à jour (v${s.current}).`, false); setTimeout(() => b.classList.add('hidden'), 4000); }
-  else if (s.state === 'disabled') { show('MAJ non configurées (UPDATE_URL absent).', false); setTimeout(() => b.classList.add('hidden'), 5000); }
   else if (s.state === 'error') { show('MAJ indispo: ' + s.error, false); setTimeout(() => b.classList.add('hidden'), 6000); }
 });
 window.api.onUpdateProgress((p) => { $('updateProgress').classList.remove('hidden'); $('updateBar').style.width = (p.pct || 0) + '%'; });

@@ -213,7 +213,6 @@ app.on('before-quit', () => { try { history.flushSync(); } catch { /* ignore */ 
 // --- Meta / MAJ ---
 ipcMain.handle('config-status', () => ({
   hasClientId: !!process.env.MS_CLIENT_ID,
-  updateConfigured: !!process.env.UPDATE_URL,
 }));
 ipcMain.handle('app-version', () => app.getVersion());
 ipcMain.handle('update-check', () => checkForUpdates({ silent: false }));

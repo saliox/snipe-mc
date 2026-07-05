@@ -1,10 +1,7 @@
 // Cœur de l'auto-update, sans dépendance à Electron (donc testable en Node pur).
 //
-// Deux sources possibles :
-//  - GitHub Releases (défaut, autonome) : le dépôt public sert de flux, aucune
-//    config ni serveur requis.
-//  - Flux HTTP générique (dev/LAN) : un dossier servi contenant latest.json
-//    + l'installeur (voir scripts/serve-updates.mjs).
+// Source unique : GitHub Releases (autonome). Le dépôt public sert de flux,
+// aucune config, aucun serveur, aucune adresse IP requise.
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { Transform } from 'node:stream';
@@ -52,18 +49,6 @@ export async function fetchJson(url) {
   return body.json();
 }
 
-// --- Source HTTP générique (latest.json) ---
-export async function fetchLatest(feedBase) {
-  const base = ensureSlash(feedBase);
-  const url = new URL('latest.json', base).toString();
-  const { statusCode, body } = await request(url, { method: 'GET', headersTimeout: 5000, bodyTimeout: 8000 });
-  if (statusCode !== 200) { await body.dump(); throw new Error(`latest.json HTTP ${statusCode}`); }
-  const info = await body.json();
-  if (!info || !info.version || !info.file) throw new Error('latest.json invalide (version/file manquants)');
-  info.url = new URL(encodeURIComponent(info.file), base).toString();
-  return info;
-}
-
 // Télécharge info.url dans `dest`, vérifie le SHA-256 si connu, renvoie `dest`.
 // onProgress({ received, total, pct }) est appelé pendant le téléchargement.
 export async function downloadTo(info, dest, onProgress) {
@@ -95,6 +80,3 @@ export async function downloadTo(info, dest, onProgress) {
   return dest;
 }
 
-function ensureSlash(base) {
-  return base.endsWith('/') ? base : base + '/';
-}

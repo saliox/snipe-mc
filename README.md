@@ -117,39 +117,35 @@ Confidentialité et sécurité → Espace développeurs. Si bloqué, utilise `np
 > **`.env` de l'app packagée** : l'app le cherche, dans l'ordre, à côté de
 > `Snipe MC.exe`, puis dans le dossier userData, puis à la racine du projet (dev).
 
-## Mises à jour automatiques (auto-hébergées)
+## Mises à jour automatiques (autonomes via GitHub)
 
-L'app se met à jour toute seule depuis **un PC de ton choix** (pas de cloud). Ce PC
-héberge les nouvelles versions ; chaque app cliente vérifie au démarrage, télécharge
-et installe.
+L'app se met à jour **toute seule** depuis les *Releases* GitHub du dépôt public
+`saliox/snipe-mc`. **Aucune configuration, aucune adresse IP, aucun serveur à héberger.**
+Chaque app cliente vérifie au démarrage, télécharge la MAJ différentielle (~0,5 Mo) ou
+l'installeur complet en repli, et l'installe.
 
-### Sur le PC qui héberge
+### Publier une nouvelle version (côté mainteneur uniquement)
 
 ```bash
 # 1. bumper la version dans package.json (ex. 1.0.0 -> 1.0.1)
-npm run publish:update "Notes de la version"   # build l'installeur + release\latest.json (SHA-256)
-npm run serve:updates                            # sert release\ sur le LAN (port 8770)
-```
-`serve:updates` affiche les URL à utiliser, ex. `http://192.168.1.50:8770/`. Laisse-le
-tourner (ou mets-le en tâche/pm2). Le pare-feu Windows peut demander d'autoriser Node.js.
-
-### Sur chaque PC client
-
-Dans le `.env` (à côté de `Snipe MC.exe`), renseigne l'URL du PC hébergeur :
-
-```
-UPDATE_URL=http://192.168.1.50:8770/
+npm run publish:update "Notes de la version"   # build + crée la Release GitHub (installeur + app.zip + SHA-256)
 ```
 
-Au lancement, si une version plus récente existe, une bannière **« Nouvelle version
-disponible »** apparaît. Clic → téléchargement (barre de progression) → l'installeur
-se lance en silencieux et l'app **redémarre à jour**. Bouton **« vérifier les MAJ »**
-aussi dans l'en-tête.
+C'est tout : les apps installées récupèrent la MAJ au prochain lancement.
+
+### Côté client
+
+**Rien à faire.** Au lancement, si une version plus récente existe, une bannière
+**« Nouvelle version disponible »** apparaît. Clic → téléchargement (barre de progression)
+→ l'installeur se lance en silencieux et l'app **redémarre à jour**. Bouton
+**« vérifier les MAJ »** aussi dans l'en-tête. Le `.env` ne sert qu'à `MS_CLIENT_ID`
+(optionnel, pour le login Microsoft) — **il ne contient aucune adresse.**
 
 - Intégrité vérifiée par **SHA-256** (le fichier est rejeté s'il ne correspond pas).
-- Sans `UPDATE_URL`, l'auto-update est simplement désactivé.
-- L'installeur étant **non signé**, la mise à jour n'est pas authentifiée
-  cryptographiquement : n'héberge le flux que sur un PC/réseau de confiance.
+- Override avancé possible via `.env` : `UPDATE_REPO=owner/name` pour pointer un autre
+  dépôt GitHub (jamais une IP).
+- L'installeur étant **non signé**, la MAJ n'est pas authentifiée cryptographiquement
+  au-delà du SHA-256 : la confiance repose sur le dépôt GitHub source.
 
 ## CLI
 

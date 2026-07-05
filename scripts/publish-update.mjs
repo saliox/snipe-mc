@@ -1,9 +1,8 @@
-// Prépare une mise à jour à héberger : construit l'installeur si besoin, calcule
-// son SHA-256, et écrit release/latest.json + une copie de l'installeur.
+// Prépare et publie une mise à jour : construit l'installeur si besoin, calcule
+// son SHA-256, écrit release/latest.json, et crée la Release GitHub (installeur +
+// app.zip différentiel). Les apps clientes se mettent à jour toutes seules ensuite.
 //
 //   node scripts/publish-update.mjs ["notes de version"]
-//
-// Ensuite, héberge le dossier release/ avec :  npm run serve:updates
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';

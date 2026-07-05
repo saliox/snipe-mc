@@ -1,6 +1,6 @@
 {
   "name": "snipe-mc",
-  "version": "1.8.7",
+  "version": "1.8.8",
   "description": "Sniper de pseudos Minecraft (Microsoft/Java) — auth MSA, sync NTP, burst timing, UI Electron",
   "type": "module",
   "main": "gui/main.js",
@@ -15,8 +15,7 @@
     "pack": "electron-builder --win --dir",
     "portable": "node scripts/build-portable.mjs",
     "installer": "node scripts/build-installer.mjs",
-    "publish:update": "node scripts/publish-update.mjs",
-    "serve:updates": "node scripts/serve-updates.mjs"
+    "publish:update": "node scripts/publish-update.mjs"
   },
   "engines": {
     "node": ">=18"
