@@ -164,7 +164,14 @@ export async function bulkCheck(names, opts = {}) {
       if (inFlight < MAX_INFLIGHT) {
         const item = nextItem();
         if (item) {
-          handleOne(item).then(() => { stats(); });
+          // .catch : un rejet imprévu de handleOne (ex. callback qui lève)
+          // deviendrait une "unhandled rejection" pouvant tuer le process.
+          // On l'enregistre comme erreur de l'item sans interrompre le scan.
+          handleOne(item).then(() => { stats(); }).catch((e) => {
+            errors++; checked++;
+            onResult({ done: checked, total, name: item.name, state: 'error', detail: e && e.message ? e.message : String(e) });
+            stats();
+          });
           return setTimeout(pump, interval); // cadence les DÉPARTS
         }
       }

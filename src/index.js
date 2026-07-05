@@ -135,6 +135,9 @@ async function main() {
         await snipe({
           name,
           token: accessToken,
+          // Fournisseur de token frais : getValidToken() rafraîchit via le refresh
+          // MS quand le token Minecraft (~24h) a expiré. Utile en surveillance longue.
+          getToken: async () => (await getValidToken()).accessToken,
           dropAt,
           monitor: !!f.monitor,
           burst: f.burst ? Number(f.burst) : undefined,
