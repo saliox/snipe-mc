@@ -54,12 +54,12 @@ async function refreshAccount() {
   const line = $('userLine');
   if (r.profile) {
     const src = r.source === 'token' ? 'token' : 'MS';
-    line.innerHTML = `whoami :: <span class="free">${esc(r.profile.name)}</span> <span class="muted">[${src}]</span>`;
+    line.innerHTML = `login : <span class="free">${esc(r.profile.name)}</span> <span class="muted">[${src}]</span>`;
     $('tokenStatus').innerHTML = `<span class="ok">✔ ${esc(r.profile.name)}</span>`;
     // Remplit auto la date du dernier changement (sans écraser une saisie manuelle).
     if (!$('dropLastChange').value) autoFillDropDate({ silent: true, onlyIfEmpty: true }).catch(() => {});
   } else {
-    line.innerHTML = 'whoami :: <span class="muted">non connecté</span>';
+    line.innerHTML = 'login : <span class="bad">False</span>';
   }
 }
 
