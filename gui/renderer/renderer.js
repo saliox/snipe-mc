@@ -284,13 +284,23 @@ async function rankedFree() {
 }
 let rankedFreeCache = [];
 async function showTopFree() {
-  if (!freeList.length) { $('freeChips').innerHTML = ''; $('claimBestBtn').classList.add('hidden'); return; }
+  if (!freeList.length) { $('freeChips').innerHTML = ''; $('claimBestBtn').classList.add('hidden'); $('gemCount').textContent = ''; return; }
   const ranked = await rankedFree();
   rankedFreeCache = ranked;
   const top = ranked.slice(0, 8).map((x) => `${x.name}(${x.tier})`).join('  ');
   cprint('free', `★ meilleurs libres : ${top}`);
-  renderFreeChips(ranked);
+  refreshFreeView();
 }
+// ★ Pépites = pseudos de valeur (tier ≤ seuil choisi). Filtre l'affichage des libres.
+function gemThreshold() { return TIERS.indexOf($('gemTier').value); }
+function isGem(item) { const i = TIERS.indexOf(item.tier); return i >= 0 && i <= gemThreshold(); }
+function displayedFree() { return $('gemsOnly').checked ? rankedFreeCache.filter(isGem) : rankedFreeCache; }
+function updateGemCount() {
+  if (!rankedFreeCache.length) { $('gemCount').textContent = ''; return; }
+  const gems = rankedFreeCache.filter(isGem).length;
+  $('gemCount').textContent = `${gems} pépite${gems > 1 ? 's' : ''} (tier ≥ ${$('gemTier').value}) sur ${rankedFreeCache.length} libres`;
+}
+function refreshFreeView() { renderFreeChips(displayedFree()); updateGemCount(); }
 // Chips cliquables : clic = réclamer (change username) le pseudo sur le token actif.
 function renderFreeChips(ranked) {
   const box = $('freeChips');
@@ -302,7 +312,9 @@ $('freeChips').onclick = (e) => {
   const chip = e.target.closest('.chip');
   if (chip) claimName(chip.dataset.name);
 };
-$('claimBestBtn').onclick = () => { if (rankedFreeCache[0]) claimName(rankedFreeCache[0].name); };
+$('claimBestBtn').onclick = () => { const d = displayedFree(); if (d[0]) claimName(d[0].name); };
+$('gemsOnly').onchange = refreshFreeView;
+$('gemTier').onchange = refreshFreeView;
 async function claimName(name) {
   if (!name) return;
   if (!window.confirm(`Réclamer « ${name} » ? Ça change le pseudo du compte du token actif (cooldown 30 j).`)) return;

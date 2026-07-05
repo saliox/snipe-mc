@@ -112,8 +112,15 @@
       </div>
       <div id="bulkEta" class="status eta"></div>
       <div id="bulkProgress" class="uprog hidden"><div id="bulkBar"></div></div>
+      <div class="row wrap">
+        <label class="chk"><input type="checkbox" id="gemsOnly" /> ★ pépites seulement</label>
+        <label class="inl">tier ≥
+          <select id="gemTier" class="in sel"><option>S</option><option selected>A</option><option>B</option><option>C</option></select>
+        </label>
+        <span id="gemCount" class="status muted"></span>
+      </div>
       <div id="freeChips" class="chips"></div>
-      <div class="hint">Clique un pseudo libre pour <b>réclamer</b> (change ton pseudo sur le compte du token actif).</div>
+      <div class="hint">Clique un pseudo libre pour <b>réclamer</b> (change ton pseudo sur le compte du token actif). « Pépites » = mots du dico, 3-lettres, prononçables (score de valeur).</div>
     </section>
 
     <!-- GENERATE -->
