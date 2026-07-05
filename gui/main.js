@@ -1,5 +1,5 @@
 // Processus principal Electron. Fait le pont entre l'UI et le moteur de snipe.
-import { app, BrowserWindow, ipcMain, shell, dialog, nativeImage, session, Menu, Tray, Notification } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, dialog, nativeImage, session, Menu, Tray, Notification, clipboard } from 'electron';
 import { request } from 'undici';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -409,6 +409,9 @@ ipcMain.handle('variants', (_e, base) => {
   try { return { ok: true, names: nameVariants(String(base || '')) }; }
   catch (e) { return { ok: false, error: e.message }; }
 });
+
+// Copie dans le presse-papiers (module Electron : fiable, sans permission navigateur).
+ipcMain.handle('clipboard-write', (_e, text) => { try { clipboard.writeText(String(text ?? '')); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; } });
 
 // Préférences d'UI persistées (réglages mémorisés entre les lancements).
 ipcMain.handle('prefs-get', () => { try { return { ok: true, prefs: getPrefs() }; } catch (e) { return { ok: false, error: e.message }; } });

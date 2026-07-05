@@ -267,6 +267,13 @@ $('resumeBtn').onclick = () => {
 };
 
 $('exportFreeBtn').onclick = () => exportFree({ auto: false });
+$('copyFreeBtn').onclick = async () => {
+  // Copie la vue courante des libres (filtrée « pépites » si activé), sinon la liste brute.
+  const list = rankedFreeCache.length ? displayedFree().map((x) => x.name) : freeList.slice();
+  if (!list.length) { cprint('warn', 'Aucun pseudo libre à copier.'); return; }
+  const r = await window.api.clipboardWrite(list.join('\n'));
+  cprint(r && r.ok ? 'ok' : 'err', r && r.ok ? `${list.length} pseudos libres copiés dans le presse-papiers.` : 'Copie échouée.');
+};
 $('exportCsvBtn').onclick = async () => {
   if (!allResults.size) { cprint('warn', 'Aucun résultat à exporter (lance un check).'); return; }
   const rows = ['pseudo,statut,detail'];

@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('api', {
 
   generate: (opts) => ipcRenderer.invoke('generate', opts),
   variants: (base) => ipcRenderer.invoke('variants', base),
+  clipboardWrite: (text) => ipcRenderer.invoke('clipboard-write', text),
   prefsGet: () => ipcRenderer.invoke('prefs-get'),
   prefsSet: (obj) => ipcRenderer.invoke('prefs-set', obj),
   rankNames: (names) => ipcRenderer.invoke('rank-names', names),
