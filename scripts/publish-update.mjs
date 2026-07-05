@@ -44,7 +44,8 @@ const latest = {
   notes,
   pubDate: new Date().toISOString(),
 };
-fs.writeFileSync(path.join(releaseDir, 'latest.json'), JSON.stringify(latest, null, 2));
+const latestJsonPath = path.join(releaseDir, 'latest.json');
+fs.writeFileSync(latestJsonPath, JSON.stringify(latest, null, 2));
 
 console.log('Feed local prêt dans release/ :');
 console.log(`  version : ${version}  |  ${(size / 1e6).toFixed(1)} Mo  |  sha256 ${sha256.slice(0, 12)}…`);
@@ -55,11 +56,13 @@ const tag = `v${version}`;
 console.log(`\nPublication GitHub (${tag})...`);
 const exists = spawnSync('gh', ['release', 'view', tag], { stdio: 'ignore' }).status === 0;
 let gh;
+// On publie AUSSI latest.json comme asset : c'est le repli qui porte le sha256
+// quand GitHub ne fournit pas de `digest` (fetchLatestGithub le lit pour vérifier).
 if (exists) {
   console.log('  release existante → remplacement de l\'asset');
-  gh = spawnSync('gh', ['release', 'upload', tag, installerPath, '--clobber'], { stdio: 'inherit' });
+  gh = spawnSync('gh', ['release', 'upload', tag, installerPath, latestJsonPath, '--clobber'], { stdio: 'inherit' });
 } else {
-  gh = spawnSync('gh', ['release', 'create', tag, installerPath,
+  gh = spawnSync('gh', ['release', 'create', tag, installerPath, latestJsonPath,
     '--title', `Snipe MC ${version}`, '--notes', notes || `Snipe MC ${version}`], { stdio: 'inherit' });
 }
 if (gh.status !== 0) {

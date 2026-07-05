@@ -26,7 +26,7 @@ loadEnv();
 
 import { bus, sleep } from '../src/util.js';
 import * as watchlist from './watchlist.js';
-import { loginInteractive, cachedProfile } from '../src/auth.js';
+import { loginInteractive, cachedProfile, getValidToken } from '../src/auth.js';
 import { isNameFree, nameStatus, validName } from '../src/mojang.js';
 import { changeName, nameChangeInfo } from '../src/nameapi.js';
 import { snipe, requestStop } from '../src/sniper.js';
@@ -128,8 +128,10 @@ function startMonitor() {
   if (monitor.on) return;
   monitor.on = true;
   monitor.notified.clear();
-  monitor.timer = setInterval(monitorTick, 90000);
-  monitorTick();
+  // .catch aux points d'appel : monitorTick est async et lancé par setInterval,
+  // sans quoi un rejet deviendrait une "unhandled rejection" (crash potentiel).
+  monitor.timer = setInterval(() => { monitorTick().catch((e) => console.error('[monitor] tick:', e)); }, 90000);
+  monitorTick().catch((e) => console.error('[monitor] tick:', e));
   updateTray();
   if (win && !win.isDestroyed()) win.webContents.send('monitor-status', { on: true });
 }
@@ -154,23 +156,29 @@ async function monitorTick() {
         bus.emit('log', { level: 'free', msg: `★ WATCHLIST : ${name} est LIBRE !`, t: Date.now() });
         if (win && !win.isDestroyed()) win.webContents.send('watch-free', { name });
         if (monitor.autoclaim) {
-          const active = await tryGetActiveToken();
-          if (active) {
-            const cr = await changeName(name, active.accessToken);
-            bus.emit('log', { level: cr.ok ? 'ok' : 'err', msg: cr.ok ? `Auto-claim : ${name} obtenu ! (cooldown 30 j → auto-claim coupé, veille conservée)` : `Auto-claim ${name} : ${cr.reason}`, t: Date.now() });
-            if (cr.ok) {
-              // Réclamé : on le retire de la watchlist et on coupe l'auto-claim
-              // (cooldown 30 j → toute autre tentative échouerait). La veille
-              // continue pour NOTIFIER sur les autres pseudos.
-              try { watchlist.removeWatch(name); } catch { /* ignore */ }
-              void sendWebhook({ title: '🎯 Pseudo auto-réclamé !', description: `**${name}** t'appartient maintenant.`, color: BLURPLE });
-              monitor.autoclaim = false;
-              if (win && !win.isDestroyed()) {
-                win.webContents.send('watch-free', { name, claimed: true });
-                win.webContents.send('monitor-status', { on: monitor.on, autoclaim: false });
+          // Garde individuelle : un échec de claim (réseau/401/…) ne doit pas
+          // avorter tout le tick ni sauter le reste de la watchlist.
+          try {
+            const active = await tryGetActiveToken();
+            if (active) {
+              const cr = await changeName(name, active.accessToken);
+              bus.emit('log', { level: cr.ok ? 'ok' : 'err', msg: cr.ok ? `Auto-claim : ${name} obtenu ! (cooldown 30 j → auto-claim coupé, veille conservée)` : `Auto-claim ${name} : ${cr.reason}`, t: Date.now() });
+              if (cr.ok) {
+                // Réclamé : on le retire de la watchlist et on coupe l'auto-claim
+                // (cooldown 30 j → toute autre tentative échouerait). La veille
+                // continue pour NOTIFIER sur les autres pseudos.
+                try { watchlist.removeWatch(name); } catch { /* ignore */ }
+                void sendWebhook({ title: '🎯 Pseudo auto-réclamé !', description: `**${name}** t'appartient maintenant.`, color: BLURPLE });
+                monitor.autoclaim = false;
+                if (win && !win.isDestroyed()) {
+                  win.webContents.send('watch-free', { name, claimed: true });
+                  win.webContents.send('monitor-status', { on: monitor.on, autoclaim: false });
+                }
+                break; // pas d'autre claim ce tick (cooldown)
               }
-              break; // pas d'autre claim ce tick (cooldown)
             }
+          } catch (e) {
+            bus.emit('log', { level: 'err', msg: `Auto-claim ${name} : ${e.message}`, t: Date.now() });
           }
         }
       }
@@ -512,7 +520,12 @@ ipcMain.handle('snipe', async (_e, opts) => {
     if (active.source === 'microsoft' && !active.profile) {
       return { ok: false, error: "Ce compte n'a pas de profil Java." };
     }
-    const result = await snipe({ ...common, token: active.accessToken });
+    // Token-provider seulement pour la source Microsoft (rafraîchissable). Un bearer
+    // collé à la main n'est pas rafraîchissable : un 401 sera alors signalé, pas bouclé.
+    const getToken = active.source === 'microsoft'
+      ? async () => (await getValidToken()).accessToken
+      : undefined;
+    const result = await snipe({ ...common, token: active.accessToken, getToken });
     return { ok: true, result };
   } catch (e) { return { ok: false, error: e.message }; }
 });

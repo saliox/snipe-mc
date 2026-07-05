@@ -39,7 +39,20 @@ export async function fetchLatestGithub(repo) {
   }));
   const asset = assets.find((a) => /\.exe$/i.test(a.name)) || assets[0];
   if (!version || !asset) throw new Error('Release GitHub sans installeur .exe');
-  return { version, url: asset.url, file: asset.name, size: asset.size, sha256: asset.sha256, notes: rel.body || '', assets };
+  // Le sha256 vient du champ `digest` (optionnel) de GitHub. S'il est absent, on le
+  // récupère depuis latest.json publié comme asset de la release (voir
+  // scripts/publish-update.mjs) afin que la vérification d'intégrité reste possible.
+  let sha256 = asset.sha256;
+  if (!sha256) {
+    const metaAsset = assets.find((a) => a.name === 'latest.json');
+    if (metaAsset) {
+      try {
+        const j = await fetchJson(metaAsset.url);
+        if (j && j.file === asset.name && j.sha256) sha256 = String(j.sha256);
+      } catch { /* indisponible : downloadTo refusera l'installation sans sha256 */ }
+    }
+  }
+  return { version, url: asset.url, file: asset.name, size: asset.size, sha256, notes: rel.body || '', assets };
 }
 
 // Télécharge et parse un petit asset JSON (métadonnées de MAJ différentielle).
@@ -52,6 +65,12 @@ export async function fetchJson(url) {
 // Télécharge info.url dans `dest`, vérifie le SHA-256 si connu, renvoie `dest`.
 // onProgress({ received, total, pct }) est appelé pendant le téléchargement.
 export async function downloadTo(info, dest, onProgress) {
+  // Vérification d'intégrité OBLIGATOIRE : sans sha256 attendu, on refuse d'installer
+  // (un flux altéré pourrait omettre le hash pour contourner le contrôle -> RCE).
+  if (!info || !info.sha256 || !String(info.sha256).trim()) {
+    fs.rmSync(dest, { force: true });
+    throw new Error('Mise à jour refusée : aucun SHA-256 fourni — vérification d\'intégrité impossible.');
+  }
   const { statusCode, headers, body } = await request(info.url, {
     maxRedirections: 5,
     headers: { 'user-agent': UA },
@@ -73,7 +92,7 @@ export async function downloadTo(info, dest, onProgress) {
   await pipeline(body, meter, fs.createWriteStream(dest));
 
   const digest = hash.digest('hex').toLowerCase();
-  if (info.sha256 && digest !== String(info.sha256).toLowerCase()) {
+  if (digest !== String(info.sha256).toLowerCase()) {
     fs.rmSync(dest, { force: true });
     throw new Error('Somme de contrôle SHA-256 invalide — fichier corrompu ou altéré.');
   }

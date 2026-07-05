@@ -49,15 +49,20 @@ async function attempt(pool, name, token) {
  * @param {number} [opts.spacingMs]   espacement entre requêtes (def 30ms)
  * @param {number} [opts.leadMs]      avance de la 1re requête sur T0 (def 40ms)
  * @param {boolean} [opts.skipNtp]    ne pas synchroniser l'horloge
+ * @param {() => Promise<string>} [opts.getToken] fournisseur de token frais
+ *        (rafraîchissement sur 401 / expiration ~24h en surveillance longue)
  */
 export async function snipe(opts) {
   const {
-    name, token, dropAt, monitor = false,
+    name, token, dropAt, monitor = false, getToken = null,
     connections = 3, burst = 6, spacingMs = 30, leadMs = 40, skipNtp = false,
   } = opts;
 
   stopFlag = false;
   const pool = new Pool(HOST, { connections, pipelining: 1 });
+  // `session.token` est mutable : refreshToken() le remplace après un 401 / une
+  // expiration. Le token d'accès Minecraft n'est valide que ~24h.
+  const session = { token, getToken };
   let offset = 0;
 
   try {
@@ -77,7 +82,7 @@ export async function snipe(opts) {
     // on attend l'instant local L tel que L + offset = T, soit L = T - offset.
     const toLocal = (realMs) => realMs - offset;
 
-    if (monitor) return await monitorLoop(pool, name, token, { burst, spacingMs });
+    if (monitor) return await monitorLoop(pool, name, session, { burst, spacingMs });
 
     if (!dropAt) throw new Error('Mode planifié : --at requis (ou utilise --monitor).');
 
@@ -90,8 +95,11 @@ export async function snipe(opts) {
     if (warmAtLocal > Date.now()) {
       await sleepUntil(warmAtLocal);
     }
+    // Rafraîchissement proactif juste avant le drop : sur un snipe planifié loin
+    // dans le temps, le token pourrait avoir expiré depuis le démarrage.
+    if (session.getToken) await refreshToken(session);
     log.info('Pré-chauffage des connexions...');
-    await warmup(pool, token, connections);
+    await warmup(pool, session.token, connections);
     log.ok('Connexions prêtes.');
 
     // Rafale : première requête `leadMs` avant T0, puis toutes les `spacingMs`.
@@ -100,7 +108,15 @@ export async function snipe(opts) {
       `1re à T0-${leadMs} ms. En attente...`);
     await sleepUntil(firstLocal, 20);
 
-    const result = await fireBurst(pool, name, token, { burst, spacingMs });
+    let result = await fireBurst(pool, name, session, { burst, spacingMs });
+    // Token expiré pile au moment du drop : rafraîchit et retente une fois.
+    if (!result.success && session.getToken && result.attempts.some((a) => a.status === 401)) {
+      log.warn('401 pendant la rafale — rafraîchissement du token et nouvelle tentative.');
+      if (await refreshToken(session)) {
+        await warmup(pool, session.token, connections);
+        result = await fireBurst(pool, name, session, { burst, spacingMs });
+      }
+    }
     reportResult(result, name);
     return result;
   } finally {
@@ -108,13 +124,33 @@ export async function snipe(opts) {
   }
 }
 
-async function fireBurst(pool, name, token, { burst, spacingMs }) {
+// Rafraîchit le token d'accès Minecraft via le fournisseur `session.getToken`.
+// Renvoie true UNIQUEMENT si un token RÉELLEMENT différent a été obtenu (sinon
+// réessayer avec le même token bouclerait indéfiniment sur un 401).
+async function refreshToken(session) {
+  if (!session.getToken) return false;
+  try {
+    const t = await session.getToken();
+    if (t && t !== session.token) {
+      session.token = t;
+      log.ok('Token Minecraft rafraîchi.');
+      return true;
+    }
+  } catch (e) {
+    log.err(`Échec du rafraîchissement du token : ${e.message}`);
+  }
+  return false;
+}
+
+async function fireBurst(pool, name, session, { burst, spacingMs }) {
   const inflight = [];
   let winner = null;
   for (let i = 0; i < burst; i++) {
+    // Claim déjà réussi : inutile de continuer à spammer des requêtes de renommage.
+    if (winner) break;
     const t = Date.now();
     inflight.push(
-      attempt(pool, name, token).then((r) => {
+      attempt(pool, name, session.token).then((r) => {
         const dt = (Date.now() - t);
         log.info(`  req#${i + 1} → ${statusColor(r.status)} (${dt} ms)` +
           (r.retryAfter ? ` retry-after ${r.retryAfter}s` : ''));
@@ -130,10 +166,12 @@ async function fireBurst(pool, name, token, { burst, spacingMs }) {
 
 // Mode surveillance : poll la dispo et déclenche une rafale dès que le nom
 // passe libre. Utile quand on ne connaît pas la seconde exacte du drop.
-async function monitorLoop(pool, name, token, { burst, spacingMs }) {
+const MAX_FAILED_BURSTS = 5; // rafales perdues (nom contesté) avant abandon
+async function monitorLoop(pool, name, session, { burst, spacingMs }) {
   log.step(`Surveillance de ${c.yellow}${name}${c.reset} (Ctrl+C pour arrêter)`);
-  await warmup(pool, token, 2);
+  await warmup(pool, session.token, 2);
   let polls = 0;
+  let failedBursts = 0;
   while (!stopFlag) {
     polls++;
     const { body, statusCode } = await pool.request({
@@ -141,17 +179,51 @@ async function monitorLoop(pool, name, token, { burst, spacingMs }) {
       // propre, mais rester sur le pool chaud réduit la latence de bascule.
       path: `/minecraft/profile/name/${encodeURIComponent(name)}/available`,
       method: 'GET',
-      headers: { authorization: `Bearer ${token}` },
+      headers: { authorization: `Bearer ${session.token}` },
     });
     let status = null;
     if (statusCode === 200) status = (await body.json()).status;
     else await body.dump();
 
+    // 401 : token expiré (la surveillance peut tourner >24h). Condition BRUYANTE,
+    // jamais un status=null silencieux : on tente un rafraîchissement puis on reprend.
+    if (statusCode === 401) {
+      log.warn(`401 sur la sonde de ${name} — token expiré/invalide, tentative de rafraîchissement...`);
+      if (!await refreshToken(session)) {
+        log.err('Rafraîchissement impossible — surveillance interrompue (reconnecte-toi).');
+        return { success: false, error: 'token-expired', attempts: [] };
+      }
+      await warmup(pool, session.token, 1);
+      continue; // resonde avec le nouveau token
+    }
+
     if (status === 'AVAILABLE') {
       log.ok(`${name} est DISPONIBLE — rafale !`);
-      const result = await fireBurst(pool, name, token, { burst, spacingMs });
+      const result = await fireBurst(pool, name, session, { burst, spacingMs });
+      if (result.success) { reportResult(result, name); return result; }
+
+      // 401 pendant la rafale : rafraîchit et reprend sans consommer de tentative.
+      if (result.attempts.some((a) => a.status === 401)) {
+        log.warn('401 pendant la rafale — rafraîchissement du token puis reprise.');
+        if (!await refreshToken(session)) {
+          log.err('Rafraîchissement impossible — surveillance interrompue (reconnecte-toi).');
+          return { success: false, error: 'token-expired', attempts: result.attempts };
+        }
+        await warmup(pool, session.token, 1);
+        continue;
+      }
+
+      // Rafale perdue (nom pris par plus rapide / contesté) : on REPREND la
+      // surveillance au lieu d'abandonner, jusqu'à un plafond de tentatives.
+      failedBursts++;
       reportResult(result, name);
-      return result;
+      if (failedBursts >= MAX_FAILED_BURSTS) {
+        log.err(`Abandon après ${failedBursts} rafales échouées sur ${name}.`);
+        return result;
+      }
+      log.warn(`Rafale perdue (${failedBursts}/${MAX_FAILED_BURSTS}) — reprise de la surveillance.`);
+      await sleep(1000);
+      continue;
     }
     if (polls % 20 === 0) log.info(`...toujours ${status || statusCode} (${polls} sondages)`);
     await sleep(1000); // 1 req/s : sûr vis-à-vis du rate limit
@@ -172,8 +244,10 @@ function reportResult(result, name) {
   if (result.success) {
     log.ok(`${c.green}🎯 SNIPE RÉUSSI${c.reset} — ${name} obtenu (req#${result.winner.index}) !`);
   } else {
+    const got401 = result.attempts.some((a) => a.status === 401);
     const got429 = result.attempts.some((a) => a.status === 429);
     log.err(`Échec du snipe de ${name}.` +
+      (got401 ? ' Token expiré/invalide (401) : reconnecte-toi (node src/index.js login).' : '') +
       (got429 ? ' Rate-limité (429) : réduis burst/augmente spacing, ou nom pris par plus rapide.' : ''));
   }
 }
