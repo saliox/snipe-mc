@@ -417,17 +417,24 @@ window.api.onBulkStats((s) => {
 
 // Checkpoint persistant (fichier userData via main). Sauvegarde débouncée pour
 // ne pas spammer l'IPC pendant un gros scan.
+// Sérialise UNE seule fois côté renderer et envoie la chaîne brute : le main
+// l'écrit telle quelle → on évite un 3e passage O(n) (JSON.stringify côté main)
+// et le clone d'un gros graphe d'objets en IPC.
+function persistCheckpoint(obj) {
+  try { return window.api.checkpointSaveRaw(JSON.stringify(obj)); }
+  catch { return Promise.resolve({ ok: false }); }
+}
 let checkpointTimer = null;
 function saveCheckpoint() {
   if (checkpointTimer) return;
   checkpointTimer = setTimeout(() => {
     checkpointTimer = null;
-    window.api.checkpointSave({ names: lastNames, results: [...allResults.values()], tally, ts: Date.now() });
+    persistCheckpoint({ names: lastNames, results: [...allResults.values()], tally, ts: Date.now() });
   }, 2000);
 }
 function saveCheckpointNow() {
   if (checkpointTimer) { clearTimeout(checkpointTimer); checkpointTimer = null; }
-  return window.api.checkpointSave({ names: lastNames, results: [...allResults.values()], tally, ts: Date.now() });
+  return persistCheckpoint({ names: lastNames, results: [...allResults.values()], tally, ts: Date.now() });
 }
 async function loadCheckpoint() {
   try {
@@ -508,14 +515,17 @@ function updateUniInfo() {
 let uniCkptTimer = null;
 function saveUnlimitedCheckpoint() {
   if (uniCkptTimer) return;
+  // Chaque écriture coûte O(n) (sérialise tout le set). On espace l'écriture à
+  // mesure que le set grossit → débit borné (à 500k : ~1/min au lieu de 1/5 s).
+  const interval = Math.min(60000, Math.max(5000, allResults.size / 8));
   uniCkptTimer = setTimeout(() => {
     uniCkptTimer = null;
-    window.api.checkpointSave({ unlimited: true, genOpts: currentGenOpts(300), results: [...allResults.values()], tally, ts: Date.now() });
-  }, 5000);
+    persistCheckpoint({ unlimited: true, genOpts: currentGenOpts(300), results: [...allResults.values()], tally, ts: Date.now() });
+  }, interval);
 }
 function saveUnlimitedCheckpointNow() {
   if (uniCkptTimer) { clearTimeout(uniCkptTimer); uniCkptTimer = null; }
-  return window.api.checkpointSave({ unlimited: true, genOpts: currentGenOpts(300), results: [...allResults.values()], tally, ts: Date.now() });
+  return persistCheckpoint({ unlimited: true, genOpts: currentGenOpts(300), results: [...allResults.values()], tally, ts: Date.now() });
 }
 $('genUnlimitedStopBtn').onclick = () => { unlimited = false; window.api.bulkStop(); cprint('warn', 'Arrêt du scan illimité…'); };
 $('genUnlimitedBtn').onclick = () => startUnlimited(true);

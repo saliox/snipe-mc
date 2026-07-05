@@ -156,10 +156,11 @@
       <div class="row wrap">
         <label class="chk"><input type="checkbox" id="autoClaim" /> auto-claim le 1er libre qui matche</label>
         <label class="inl">tier ≥
-          <select id="autoClaimTier" class="in sel"><option>S</option><option>A</option><option selected>B</option><option>C</option><option>D</option></select>
+          <select id="autoClaimTier" class="in sel"><option>S</option><option selected>A</option><option>B</option><option>C</option><option>D</option></select>
         </label>
         <label class="inl">len ≤ <input id="autoClaimLen" class="in num" type="number" value="16" min="3" max="16" /></label>
       </div>
+      <div class="hint">⚠ l'auto-claim <b>change ton pseudo automatiquement</b> (cooldown Java 30 j) et n'agit qu'une seule fois avant d'arrêter le scan. Reste strict sur le tier pour ne pas brûler ton cooldown sur un pseudo médiocre.</div>
       <div id="unlimitedInfo" class="status eta"></div>
     </section>
 

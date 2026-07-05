@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('api', {
   historyFreeAll: () => ipcRenderer.invoke('history-free-all'),
   historyClear: () => ipcRenderer.invoke('history-clear'),
   checkpointSave: (data) => ipcRenderer.invoke('checkpoint-save', data),
+  checkpointSaveRaw: (str) => ipcRenderer.invoke('checkpoint-save-raw', str),
   checkpointLoad: () => ipcRenderer.invoke('checkpoint-load'),
   checkpointClear: () => ipcRenderer.invoke('checkpoint-clear'),
 

@@ -309,6 +309,17 @@ ipcMain.handle('checkpoint-save', async (_e, data) => {
     return { ok: true };
   } catch (e) { return { ok: false, error: e.message }; }
 });
+// Variante « brute » : le renderer a déjà sérialisé (JSON string). On écrit tel
+// quel → pas de 2e JSON.stringify ici ni de clone d'un gros graphe d'objets en IPC.
+ipcMain.handle('checkpoint-save-raw', async (_e, str) => {
+  try {
+    if (typeof str !== 'string') return { ok: false, error: 'payload non-string' };
+    const tmp = `${CHECKPOINT_FILE()}.${Date.now()}.tmp`;
+    await fs.promises.writeFile(tmp, str);
+    await fs.promises.rename(tmp, CHECKPOINT_FILE());
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
 ipcMain.handle('checkpoint-load', () => {
   try { return { ok: true, data: JSON.parse(fs.readFileSync(CHECKPOINT_FILE(), 'utf8')) }; }
   catch { return { ok: true, data: null }; }
