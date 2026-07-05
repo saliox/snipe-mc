@@ -370,6 +370,11 @@ ipcMain.handle('webhook-test', async (_e, url) => {
   try { return await sendWebhook({ title: '✅ Test Snipe MC', description: 'Les alertes Discord fonctionnent — tu seras prévenu quand un pseudo surveillé se libère.' }, url); }
   catch (e) { return { ok: false, error: e.message }; }
 });
+// Alerte pépite (envoyée depuis le renderer pendant un scan). No-op si webhook off.
+ipcMain.handle('webhook-gem', async (_e, p) => {
+  try { return await sendWebhook({ title: '💎 Pépite libre !', description: `**${p?.name}** (tier ${p?.tier || '?'}) vient de se libérer — réclame vite (cooldown 30 j).`, color: BLURPLE }); }
+  catch (e) { return { ok: false, error: e.message }; }
+});
 
 // --- Export / import config (sans les tokens : liés machine + sensibles) ---
 ipcMain.handle('config-export', async (_e, payload) => {

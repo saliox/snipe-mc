@@ -330,6 +330,24 @@ $('freeChips').addEventListener('contextmenu', async (e) => {
 $('claimBestBtn').onclick = () => { const d = displayedFree(); if (d[0]) claimName(d[0].name); };
 $('gemsOnly').onchange = refreshFreeView;
 $('gemTier').onchange = refreshFreeView;
+
+// Alerte Discord quand une pépite (tier ≥ seuil) se libère pendant un scan.
+// Dédup par nom + throttle 2,5 s (anti rate-limit Discord). Envoi = no-op si le
+// webhook n'est pas configuré/activé (géré côté main).
+const gemAlerted = new Set();
+let lastGemAlert = 0;
+async function maybeGemAlert(name) {
+  const key = name.toLowerCase();
+  if (gemAlerted.has(key)) return;
+  const rk = await window.api.rankNames([name]);
+  const t = rk && rk.ok && rk.ranked[0];
+  if (!t || TIERS.indexOf(t.tier) > gemThreshold()) return;
+  const now = Date.now();
+  if (now - lastGemAlert < 2500) return;
+  lastGemAlert = now;
+  gemAlerted.add(key);
+  window.api.webhookGem(name, t.tier);
+}
 async function claimName(name) {
   if (!name) return;
   if (!window.confirm(`Réclamer « ${name} » ? Ça change le pseudo du compte du token actif (cooldown 30 j).`)) return;
@@ -407,6 +425,8 @@ window.api.onBulkResult((r) => {
     freeList.push(r.name);
     // Auto-claim pendant le scan illimité : réclame le 1er libre qui matche.
     if (unlimited && $('autoClaim').checked) maybeAutoClaim(r.name);
+    // Alerte Discord si une pépite se libère (scan laissé en fond).
+    if ($('gemAlert').checked) maybeGemAlert(r.name);
     // Scan illimité : coupe le batch dès que le seuil de libres est atteint.
     if (unlimited && unlimitedThreshold && freeList.length >= unlimitedThreshold) {
       unlimited = false;
@@ -966,7 +986,7 @@ const PREF_FIELDS = [
   'genMode', 'genLen', 'genCharset', 'genCount', 'genPattern',
   'filterOg', 'filterNoRepeat', 'genExhaustive', 'unlimitedThreshold',
   'autoClaim', 'autoClaimTier', 'autoClaimLen', 'delay',
-  'gemsOnly', 'gemTier', 'burst', 'spacing', 'lead', 'connections', 'skipNtp',
+  'gemsOnly', 'gemTier', 'gemAlert', 'burst', 'spacing', 'lead', 'connections', 'skipNtp',
 ];
 function collectPrefs() {
   const out = {};

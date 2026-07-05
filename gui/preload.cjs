@@ -50,6 +50,7 @@ contextBridge.exposeInMainWorld('api', {
   webhookGet: () => ipcRenderer.invoke('webhook-get'),
   webhookSet: (p) => ipcRenderer.invoke('webhook-set', p),
   webhookTest: (url) => ipcRenderer.invoke('webhook-test', url),
+  webhookGem: (name, tier) => ipcRenderer.invoke('webhook-gem', { name, tier }),
   configExport: (payload) => ipcRenderer.invoke('config-export', payload),
   configImport: () => ipcRenderer.invoke('config-import'),
   pickTxt: () => ipcRenderer.invoke('pick-txt'),
