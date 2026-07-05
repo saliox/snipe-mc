@@ -322,7 +322,7 @@ async function maybeAutoClaim(name) {
     unlimited = false; window.api.bulkStop();
     cprint('step', `Auto-claim de ${name} (${item.tier})…`);
     const r = await window.api.changeUsername(name);
-    if (r.ok) cprint('ok', `🎯 Auto-claim réussi : pseudo changé en ${r.name} !`);
+    if (r.ok) { cprint('ok', `🎯 Auto-claim réussi : pseudo changé en ${r.name} !`); $('dropLastChange').value = ''; }
     else cprint('err', `Auto-claim ${name} échoué : ${r.reason || r.error}`);
     refreshAccount();
   }
