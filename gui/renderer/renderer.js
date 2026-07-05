@@ -708,6 +708,17 @@ $('histExportBtn').onclick = async () => {
   const r = await window.api.saveTxt({ suggested: `libres-connus-${names.length}-${stamp}.txt`, content: lines.join('\n') + '\n' });
   if (r.ok) cprint('ok', `${names.length} libres connus (triés) → ${r.path}`);
 };
+// Recharge tous les libres connus dans BULK et relance un check : certains ont pu
+// être pris depuis. L'historique se met à jour et les encore-libres redeviennent claimables.
+$('histRecheckBtn').onclick = async () => {
+  const sr = await window.api.historyFreeAll();
+  const names = (sr.ok && sr.names) ? sr.names : [];
+  if (!names.length) { cprint('warn', 'Aucun libre connu à revérifier.'); return; }
+  $('bulkNames').value = names.join('\n');
+  updateBulkCount();
+  cprint('step', `Revérification de ${names.length} libres connus → BULK`);
+  $('bulkBtn').click();
+};
 $('histClearBtn').onclick = async () => {
   await window.api.historyClear();
   $('histResult').textContent = 'historique vidé';
