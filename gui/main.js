@@ -39,6 +39,7 @@ import { setManualToken, clearManualToken, manualStatus, getActiveToken, tryGetA
 import { listAccounts, saveCurrentAsAccount, activateAccount, removeAccount, allTokens } from './accounts.js';
 import * as history from './history.js';
 import { getWebhookPublic, setWebhook, sendWebhook, BLURPLE } from './webhook.js';
+import { getPrefs, setPrefs } from './prefs.js';
 import { initUpdater, checkForUpdates, applyUpdate } from './updater.js';
 
 let win;
@@ -404,6 +405,10 @@ ipcMain.handle('variants', (_e, base) => {
   try { return { ok: true, names: nameVariants(String(base || '')) }; }
   catch (e) { return { ok: false, error: e.message }; }
 });
+
+// Préférences d'UI persistées (réglages mémorisés entre les lancements).
+ipcMain.handle('prefs-get', () => { try { return { ok: true, prefs: getPrefs() }; } catch (e) { return { ok: false, error: e.message }; } });
+ipcMain.handle('prefs-set', (_e, obj) => { try { return { ok: true, prefs: setPrefs(obj) }; } catch (e) { return { ok: false, error: e.message }; } });
 
 // --- Fichier .txt (liste de pseudos) ---
 ipcMain.handle('pick-txt', async () => {

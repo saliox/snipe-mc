@@ -938,12 +938,48 @@ $('webhookTestBtn').onclick = async () => {
     : `<span class="bad">✗ ${esc(r.error || ('HTTP ' + r.status))}</span>`;
 };
 
+// ----- Préférences persistées (mémorisées entre les lancements) -----
+// Champs dont la valeur/état est restauré au démarrage. (Ni token, ni contenu de
+// liste, ni proxies : gérés à part / sensibles.)
+const PREF_FIELDS = [
+  'genMode', 'genLen', 'genCharset', 'genCount', 'genPattern',
+  'filterOg', 'filterNoRepeat', 'genExhaustive', 'unlimitedThreshold',
+  'autoClaim', 'autoClaimTier', 'autoClaimLen', 'delay',
+  'gemsOnly', 'gemTier', 'burst', 'spacing', 'lead', 'connections', 'skipNtp',
+];
+function collectPrefs() {
+  const out = {};
+  for (const id of PREF_FIELDS) {
+    const el = $(id); if (!el) continue;
+    out[id] = el.type === 'checkbox' ? el.checked : el.value;
+  }
+  return out;
+}
+let prefsTimer = null;
+function savePrefs() {
+  if (prefsTimer) return;
+  prefsTimer = setTimeout(() => { prefsTimer = null; window.api.prefsSet(collectPrefs()); }, 400);
+}
+async function restorePrefs() {
+  const r = await window.api.prefsGet();
+  const p = (r && r.ok && r.prefs) ? r.prefs : {};
+  for (const id of PREF_FIELDS) {
+    if (!(id in p)) continue;
+    const el = $(id); if (!el) continue;
+    if (el.type === 'checkbox') el.checked = !!p[id];
+    else el.value = p[id];
+  }
+  syncGenMode(); // genMode restauré → affiche/masque le champ pattern
+}
+for (const id of PREF_FIELDS) { const el = $(id); if (el) el.addEventListener('change', savePrefs); }
+
 // ----- Init -----
 refreshAccount();
 refreshAccounts();
 refreshHistStats();
 refreshWatch();
 refreshWebhook();
+restorePrefs();
 window.api.monitorStatus().then((s) => { if (s.ok) { setMonitorUI(s.on); $('watchAutoclaim').checked = !!s.autoclaim; } });
 updateBulkCount();
 loadCheckpoint();

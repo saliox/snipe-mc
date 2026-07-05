@@ -25,6 +25,8 @@ contextBridge.exposeInMainWorld('api', {
 
   generate: (opts) => ipcRenderer.invoke('generate', opts),
   variants: (base) => ipcRenderer.invoke('variants', base),
+  prefsGet: () => ipcRenderer.invoke('prefs-get'),
+  prefsSet: (obj) => ipcRenderer.invoke('prefs-set', obj),
   rankNames: (names) => ipcRenderer.invoke('rank-names', names),
   historyStats: () => ipcRenderer.invoke('history-stats'),
   historyLookup: (name) => ipcRenderer.invoke('history-lookup', name),
