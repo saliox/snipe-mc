@@ -61,7 +61,7 @@ connexions pré-chauffées et une horloge synchronisée en NTP.
 ## Installation (dev)
 
 ```bash
-cd "C:\Users\teamf\snipe mc"
+cd path/to/snipe-mc         # le dossier où tu as cloné le dépôt
 npm install
 copy .env.example .env      # puis renseigne MS_CLIENT_ID (voir .env.example)
 npm start                   # lance l'app Electron
