@@ -155,7 +155,19 @@ async function monitorTick() {
           const active = await tryGetActiveToken();
           if (active) {
             const cr = await changeName(name, active.accessToken);
-            bus.emit('log', { level: cr.ok ? 'ok' : 'err', msg: cr.ok ? `Auto-claim : ${name} obtenu !` : `Auto-claim ${name} : ${cr.reason}`, t: Date.now() });
+            bus.emit('log', { level: cr.ok ? 'ok' : 'err', msg: cr.ok ? `Auto-claim : ${name} obtenu ! (cooldown 30 j → auto-claim coupé, veille conservée)` : `Auto-claim ${name} : ${cr.reason}`, t: Date.now() });
+            if (cr.ok) {
+              // Réclamé : on le retire de la watchlist et on coupe l'auto-claim
+              // (cooldown 30 j → toute autre tentative échouerait). La veille
+              // continue pour NOTIFIER sur les autres pseudos.
+              try { watchlist.removeWatch(name); } catch { /* ignore */ }
+              monitor.autoclaim = false;
+              if (win && !win.isDestroyed()) {
+                win.webContents.send('watch-free', { name, claimed: true });
+                win.webContents.send('monitor-status', { on: monitor.on, autoclaim: false });
+              }
+              break; // pas d'autre claim ce tick (cooldown)
+            }
           }
         }
       }

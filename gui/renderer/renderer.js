@@ -860,8 +860,14 @@ function setMonitorUI(on) {
   $('monitorState').className = on ? 'free' : 'muted';
   $('monitorToggleBtn').textContent = on ? 'arrêter surveillance' : 'démarrer surveillance';
 }
-window.api.onMonitorStatus((s) => setMonitorUI(s.on));
-window.api.onWatchFree(({ name }) => { cprint('free', `★ WATCHLIST : ${name} est LIBRE !`); });
+window.api.onMonitorStatus((s) => {
+  setMonitorUI(s.on);
+  if (s.autoclaim !== undefined) $('watchAutoclaim').checked = !!s.autoclaim;
+});
+window.api.onWatchFree(({ name, claimed }) => {
+  if (claimed) { cprint('ok', `🎯 WATCHLIST : ${name} auto-réclamé !`); refreshWatch(); }
+  else cprint('free', `★ WATCHLIST : ${name} est LIBRE !`);
+});
 
 // ----- Init -----
 refreshAccount();
