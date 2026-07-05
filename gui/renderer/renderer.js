@@ -609,6 +609,12 @@ $('checkBtn').onclick = async () => {
     html += ` · compte: ${lbl}`;
   }
   if (!r.valid) html += ' <span class="warn">(format invalide)</span>';
+  // Score de valeur (pépite ?) pour un nom valide.
+  if (r.valid) {
+    const rk = await window.api.rankNames([name]);
+    const t = rk.ok && rk.ranked[0];
+    if (t) html += ` <span class="muted">· valeur <span class="tier">${t.tier}</span> (${t.score}/100)</span>`;
+  }
   if (r.seen) {
     const d = new Date(r.seen.ts).toLocaleDateString('fr-FR');
     html += ` <span class="muted">· déjà vu ${esc(r.seen.state)} le ${d}</span>`;
