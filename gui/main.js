@@ -525,6 +525,21 @@ ipcMain.handle('snipe', async (_e, opts) => {
     const getToken = active.source === 'microsoft'
       ? async () => (await getValidToken()).accessToken
       : undefined;
+
+    // Multi-cibles : snipe plusieurs pseudos EN PARALLÈLE avec le compte actif ;
+    // le 1er obtenu gagne (on ne peut de toute façon en réclamer qu'un — cooldown).
+    const targets = Array.isArray(opts.names) ? [...new Set(opts.names.filter(validName))] : [];
+    if (targets.length > 1) {
+      bus?.emit?.('log', { level: 'step', msg: `Snipe multi-cibles : ${targets.length} pseudos (le 1er libre gagne)`, t: Date.now() });
+      const runs = targets.map((nm) =>
+        snipe({ ...common, name: nm, token: active.accessToken, getToken })
+          .then((r) => ({ name: nm, success: !!r.success }))
+          .catch((e) => ({ name: nm, success: false, error: e.message })));
+      const results = await Promise.all(runs);
+      const winner = results.find((x) => x.success) || null;
+      return { ok: true, multiTarget: true, count: targets.length, winner: winner ? winner.name : null, results };
+    }
+
     const result = await snipe({ ...common, token: active.accessToken, getToken });
     return { ok: true, result };
   } catch (e) { return { ok: false, error: e.message }; }

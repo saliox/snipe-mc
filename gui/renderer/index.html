@@ -234,12 +234,12 @@
 
     <!-- SNIPE -->
     <section class="mod span2">
-      <div class="mod-h">[ SNIPE (1 pseudo) ]
+      <div class="mod-h">[ SNIPE ]
         <button id="ntpBtn" class="btn ghost tiny">test horloge (NTP)</button>
         <span id="ntpInfo" class="muted"></span>
       </div>
       <div class="row wrap">
-        <input id="snipeName" class="in mono" placeholder="pseudo à sniper" autocomplete="off" spellcheck="false" />
+        <input id="snipeName" class="in mono" placeholder="pseudo(s) à sniper — plusieurs = espace/virgule" autocomplete="off" spellcheck="false" style="flex:1;min-width:0" />
         <label class="rad"><input type="radio" name="smode" value="monitor" checked /> surveiller</label>
         <label class="rad"><input type="radio" name="smode" value="at" /> planifié</label>
         <input id="snipeAt" class="in mono" type="datetime-local" step="1" disabled />
@@ -268,6 +268,7 @@
         <button id="snipeStopBtn" class="btn danger hidden">STOP</button>
         <span id="countdown" class="status"></span>
       </div>
+      <div class="hint"><b>Multi-cibles</b> : mets plusieurs pseudos (espace/virgule) — ils sont snipés en parallèle sur le compte actif et le <b>1er obtenu gagne</b> (tu ne peux en réclamer qu'un : cooldown 30 j). « tous les comptes » reste, lui, mono-cible.</div>
     </section>
 
     <!-- CONSOLE -->

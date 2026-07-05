@@ -696,11 +696,15 @@ document.querySelectorAll('input[name="smode"]').forEach((rd) => {
   };
 });
 $('snipeBtn').onclick = async () => {
-  const name = $('snipeName').value.trim();
-  if (!name) { cprint('warn', 'Indique un pseudo à sniper.'); return; }
+  const raw = $('snipeName').value.trim();
+  if (!raw) { cprint('warn', 'Indique un pseudo à sniper.'); return; }
+  // Multi-cibles : plusieurs pseudos (espace/virgule) → le 1er obtenu gagne.
+  const names = raw.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+  const name = names[0];
   const mode = document.querySelector('input[name="smode"]:checked').value;
   const opts = {
     name,
+    names,
     monitor: mode === 'monitor',
     burst: Number($('burst').value),
     spacingMs: Number($('spacing').value),
@@ -709,6 +713,7 @@ $('snipeBtn').onclick = async () => {
     skipNtp: $('skipNtp').checked,
     allAccounts: $('allAccounts').checked,
   };
+  if (names.length > 1) cprint('step', `Multi-cibles : ${names.length} pseudos (${mode})`);
   if (mode === 'at') {
     const ms = new Date($('snipeAt').value).getTime();
     if (Number.isNaN(ms)) { cprint('err', 'Date de drop invalide.'); return; }
@@ -725,6 +730,7 @@ $('snipeBtn').onclick = async () => {
   setSnipeRunning(false);
   clearInterval(countdownTimer); $('countdown').textContent = '';
   if (!r.ok) cprint('err', 'Snipe: ' + r.error);
+  else if (r.multiTarget) cprint(r.winner ? 'ok' : 'warn', r.winner ? `🎯 ${r.winner} obtenu (sur ${r.count} cibles) !` : `Aucune des ${r.count} cibles obtenue.`);
   else if (r.multi) cprint(r.winner ? 'ok' : 'warn', r.winner ? `🎯 ${r.winner} a obtenu ${name} !` : `Aucun des ${r.count} comptes n'a eu ${name}.`);
   refreshAccount();
 };
