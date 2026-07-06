@@ -8,8 +8,9 @@ import { app } from 'electron';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { isNewer, fetchLatestGithub, downloadTo, fetchJson } from '../src/updatecore.js';
+import { isNewer, fetchLatestGithub, downloadTo, fetchJson, verifyReleaseSignature } from '../src/updatecore.js';
 
 const DEFAULT_REPO = 'saliox/snipe-mc';
 
@@ -59,8 +60,10 @@ export async function applyUpdate() {
   try {
     if (await tryAppOnlyUpdate()) return { ok: true };
 
-    // Repli : installeur complet.
-    const dest = path.join(os.tmpdir(), sanitize(lastInfo.file));
+    // Repli : installeur complet. Nom de fichier temporaire imprévisible : un nom fixe
+    // permettrait à un autre process local (même utilisateur) de pré-créer/substituer
+    // le fichier avant le téléchargement.
+    const dest = path.join(os.tmpdir(), `${crypto.randomUUID()}-${sanitize(lastInfo.file)}`);
     send('update-status', { state: 'downloading' });
     await downloadTo(lastInfo, dest, (p) => send('update-progress', p));
     send('update-status', { state: 'installing' });
@@ -91,10 +94,18 @@ async function tryAppOnlyUpdate() {
       return false;
     }
 
-    const dest = path.join(os.tmpdir(), 'snipemc-app.zip');
+    // Même exigence de signature que l'installeur complet (voir fetchLatestGithub) :
+    // app-update.json seul, même servi par GitHub, ne prouve rien sans signature.
+    if (!meta.sha256 || !meta.size) return false;
+    const payload = { version: meta.version, electron: meta.electron, sha256: meta.sha256, size: meta.size };
+    if (!verifyReleaseSignature(payload, meta.signature)) {
+      console.log('[update] app-update.json non signé/signature invalide : repli installeur complet');
+      return false;
+    }
+
+    const dest = path.join(os.tmpdir(), `snipemc-app-${crypto.randomUUID()}.zip`);
     send('update-status', { state: 'downloading' });
-    // Préfère le digest calculé par GitHub (serveur) ; repli sur app-update.json.
-    await downloadTo({ url: zipAsset.url, size: meta.size, sha256: zipAsset.sha256 || meta.sha256 }, dest, (p) => send('update-progress', p));
+    await downloadTo({ url: zipAsset.url, size: meta.size, sha256: meta.sha256 }, dest, (p) => send('update-progress', p));
     send('update-status', { state: 'installing' });
     applyAppZip(dest, meta.version || lastInfo.version);
     return true;
@@ -111,10 +122,22 @@ function applyAppZip(zipPath, version) {
   const q = (s) => String(s).replace(/'/g, "''");
   const exe = process.execPath;
   const resourcesDir = process.resourcesPath; // <install>\resources
-  const ps = path.join(os.tmpdir(), 'snipemc-appupdate.ps1');
+  // Nom de script imprévisible (voir dest plus haut, même raison).
+  const ps = path.join(os.tmpdir(), `snipemc-appupdate-${crypto.randomUUID()}.ps1`);
   const script =
     "$ErrorActionPreference='SilentlyContinue'\r\n" +
     'Start-Sleep -Seconds 1\r\n' +
+    // Anti zip-slip : System.IO.Compression.ZipFile (.NET Framework, utilisé par
+    // Expand-Archive sous Windows PowerShell 5.1) ne rejette PAS les entrées portant
+    // un chemin "..\" ou absolu comme le fait .NET Core -> on les rejette nous-mêmes
+    // AVANT extraction (une release signée reste fiable, mais on se protège aussi
+    // d'un bug d'outillage lors de la génération de l'archive).
+    "Add-Type -AssemblyName System.IO.Compression.FileSystem\r\n" +
+    `$zip = [System.IO.Compression.ZipFile]::OpenRead('${q(zipPath)}')\r\n` +
+    '$bad = $false\r\n' +
+    'foreach ($e in $zip.Entries) { if ($e.FullName -match "(^|[\\\\/])\\.\\.([\\\\/]|$)" -or [System.IO.Path]::IsPathRooted($e.FullName)) { $bad = $true; break } }\r\n' +
+    '$zip.Dispose()\r\n' +
+    'if ($bad) { exit 1 }\r\n' +
     `Expand-Archive -Path '${q(zipPath)}' -DestinationPath '${q(resourcesDir)}' -Force\r\n` +
     // Aligne la version affichée dans « Applications installées ».
     `Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\SnipeMC' -Name DisplayVersion -Value '${q(version || '')}'\r\n` +
@@ -129,7 +152,7 @@ function applyAppZip(zipPath, version) {
 // l'install puis relance l'app (l'installeur ferme l'app en cours au démarrage).
 function quitAndInstall(installerPath) {
   const exe = process.execPath;
-  const script = path.join(os.tmpdir(), 'snipemc-update.cmd');
+  const script = path.join(os.tmpdir(), `snipemc-update-${crypto.randomUUID()}.cmd`);
   // ping = petite temporisation pour laisser l'app se fermer proprement.
   const body =
     '@echo off\r\n' +

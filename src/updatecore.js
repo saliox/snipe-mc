@@ -10,6 +10,30 @@ import { request } from 'undici';
 
 const UA = 'snipe-mc-updater';
 
+// Clé publique Ed25519 figée à la compilation : ancre de confiance INDÉPENDANTE du
+// compte/dépôt GitHub. Avant, l'intégrité d'une MAJ reposait uniquement sur un
+// sha256 servi par la MÊME release GitHub que le binaire (digest ou latest.json) :
+// un compte/PAT saliox compromis pouvait donc publier un binaire ET son "empreinte
+// attendue" en même temps, contournant toute vérification. Avec cette signature,
+// la clé privée correspondante (jamais committée, jamais sur GitHub) doit AUSSI
+// être compromise pour forger une MAJ valide.
+const UPDATE_PUBLIC_KEY_B64 = 'MCowBQYDK2VwAyEAjU+MOn6iCpIVAYFnejCKpqspzzxxPaqo1NeLunuRLEw=';
+
+// Vérifie la signature Ed25519 de `payload` (objet {version,file,sha256,size} ou
+// {version,electron,sha256,size}, sérialisé en JSON avec l'ORDRE DE CLÉS EXACT
+// utilisé à la signature par scripts/publish-update.mjs).
+export function verifyReleaseSignature(payload, signatureB64) {
+  if (!signatureB64 || typeof signatureB64 !== 'string') return false;
+  try {
+    const pub = crypto.createPublicKey({
+      key: Buffer.from(UPDATE_PUBLIC_KEY_B64, 'base64'), format: 'der', type: 'spki',
+    });
+    return crypto.verify(null, Buffer.from(JSON.stringify(payload)), pub, Buffer.from(signatureB64, 'base64'));
+  } catch {
+    return false;
+  }
+}
+
 // Compare deux versions "x.y.z". Renvoie true si `a` est strictement plus récente que `b`.
 export function isNewer(a, b) {
   const pa = String(a).replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
@@ -33,26 +57,26 @@ export async function fetchLatestGithub(repo) {
   if (statusCode !== 200) { await body.dump(); throw new Error(`GitHub API HTTP ${statusCode}`); }
   const rel = await body.json();
   const version = String(rel.tag_name || '').replace(/^v/i, '');
-  const assets = (rel.assets || []).map((a) => ({
-    name: a.name, url: a.browser_download_url, size: a.size,
-    sha256: (a.digest && a.digest.startsWith('sha256:')) ? a.digest.slice(7) : null,
-  }));
+  const assets = (rel.assets || []).map((a) => ({ name: a.name, url: a.browser_download_url, size: a.size }));
   const asset = assets.find((a) => /\.exe$/i.test(a.name)) || assets[0];
   if (!version || !asset) throw new Error('Release GitHub sans installeur .exe');
-  // Le sha256 vient du champ `digest` (optionnel) de GitHub. S'il est absent, on le
-  // récupère depuis latest.json publié comme asset de la release (voir
-  // scripts/publish-update.mjs) afin que la vérification d'intégrité reste possible.
-  let sha256 = asset.sha256;
-  if (!sha256) {
-    const metaAsset = assets.find((a) => a.name === 'latest.json');
-    if (metaAsset) {
-      try {
-        const j = await fetchJson(metaAsset.url);
-        if (j && j.file === asset.name && j.sha256) sha256 = String(j.sha256);
-      } catch { /* indisponible : downloadTo refusera l'installation sans sha256 */ }
-    }
+
+  // Le sha256 seul ne suffit plus comme preuve d'intégrité : GitHub le fournit lui-même
+  // (champ `digest`), donc un compte/PAT compromis pourrait publier binaire ET empreinte
+  // ensemble. On exige latest.json avec une SIGNATURE Ed25519 (clé indépendante de
+  // GitHub, voir UPDATE_PUBLIC_KEY_B64) — sans ça, la MAJ est refusée.
+  const metaAsset = assets.find((a) => a.name === 'latest.json');
+  if (!metaAsset) throw new Error('Mise à jour refusée : latest.json (signature) absent de la release.');
+  const meta = await fetchJson(metaAsset.url);
+  if (!meta || meta.file !== asset.name || !meta.sha256 || !meta.size) {
+    throw new Error('Mise à jour refusée : latest.json incomplet ou incohérent avec l\'asset.');
   }
-  return { version, url: asset.url, file: asset.name, size: asset.size, sha256, notes: rel.body || '', assets };
+  const payload = { version: meta.version, file: meta.file, sha256: meta.sha256, size: meta.size };
+  if (!verifyReleaseSignature(payload, meta.signature)) {
+    throw new Error('Mise à jour refusée : signature de la release invalide ou absente.');
+  }
+
+  return { version, url: asset.url, file: asset.name, size: asset.size, sha256: meta.sha256, notes: rel.body || '', assets };
 }
 
 // Télécharge et parse un petit asset JSON (métadonnées de MAJ différentielle).

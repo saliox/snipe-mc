@@ -10,6 +10,24 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+
+// Signe `payload` (objet sérialisé en JSON, ORDRE DE CLÉS = ordre de déclaration de
+// l'objet passé) avec la clé privée Ed25519 SNIPE_MC_SIGN_KEY (base64, PKCS8 DER).
+// Cette clé est INDÉPENDANTE du compte GitHub : sans elle, aucune MAJ n'est acceptée
+// par les clients (voir src/updatecore.js : verifyReleaseSignature). Génération :
+//   node -e "const c=require('crypto');const{publicKey,privateKey}=c.generateKeyPairSync('ed25519');console.log('PUB',publicKey.export({type:'spki',format:'der'}).toString('base64'));console.log('PRIV',privateKey.export({type:'pkcs8',format:'der'}).toString('base64'))"
+// Colle PUB dans UPDATE_PUBLIC_KEY_B64 (src/updatecore.js) et garde PRIV secret,
+// exporté uniquement en variable d'environnement au moment de publier.
+function signPayload(payload) {
+  const keyB64 = process.env.SNIPE_MC_SIGN_KEY;
+  if (!keyB64) {
+    console.error('\n✗ SNIPE_MC_SIGN_KEY manquant : impossible de signer la release.');
+    console.error('  Sans signature, les clients refuseront la mise à jour (voir README).');
+    process.exit(1);
+  }
+  const priv = crypto.createPrivateKey({ key: Buffer.from(keyB64, 'base64'), format: 'der', type: 'pkcs8' });
+  return crypto.sign(null, Buffer.from(JSON.stringify(payload)), priv).toString('base64');
+}
 const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
 const notes = process.argv.slice(2).join(' ');
 
@@ -36,13 +54,12 @@ const size = buf.length;
 fs.mkdirSync(releaseDir, { recursive: true });
 fs.copyFileSync(installerPath, path.join(releaseDir, installerName));
 
+const signedPayload = { version, file: installerName, sha256, size };
 const latest = {
-  version,
-  file: installerName,
-  sha256,
-  size,
+  ...signedPayload,
   notes,
   pubDate: new Date().toISOString(),
+  signature: signPayload(signedPayload),
 };
 const latestJsonPath = path.join(releaseDir, 'latest.json');
 fs.writeFileSync(latestJsonPath, JSON.stringify(latest, null, 2));
@@ -82,7 +99,8 @@ try {
   if (z.status === 0 && fs.existsSync(appZip)) {
     const zbuf = fs.readFileSync(appZip);
     const electronVer = JSON.parse(fs.readFileSync(path.join(root, 'node_modules', 'electron', 'package.json'), 'utf8')).version;
-    const meta = { version, electron: electronVer, sha256: crypto.createHash('sha256').update(zbuf).digest('hex'), size: zbuf.length };
+    const diffPayload = { version, electron: electronVer, sha256: crypto.createHash('sha256').update(zbuf).digest('hex'), size: zbuf.length };
+    const meta = { ...diffPayload, signature: signPayload(diffPayload) };
     const metaFile = path.join(root, 'dist', 'app-update.json');
     fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2));
     const up = spawnSync('gh', ['release', 'upload', tag, appZip, metaFile, '--clobber'], { stdio: 'inherit' });
