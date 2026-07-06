@@ -1061,8 +1061,10 @@ refreshAccounts();
 refreshHistStats();
 refreshWatch();
 refreshWebhook();
-restorePrefs();
 window.api.monitorStatus().then((s) => { if (s.ok) { setMonitorUI(s.on); $('watchAutoclaim').checked = !!s.autoclaim; } });
 updateBulkCount();
-loadCheckpoint();
+// Ordre important : d'abord restaurer les prefs, PUIS charger le checkpoint — pour
+// qu'une reprise de scan illimité applique ses réglages de génération en dernier
+// (mêmes params que le scan d'origine) sans être écrasée par les prefs (course).
+restorePrefs().then(loadCheckpoint);
 cprint('step', 'Minecraft Sniper prêt. Colle un token ou connecte-toi (MS).');
