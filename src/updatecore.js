@@ -17,7 +17,7 @@ const UA = 'snipe-mc-updater';
 // attendue" en même temps, contournant toute vérification. Avec cette signature,
 // la clé privée correspondante (jamais committée, jamais sur GitHub) doit AUSSI
 // être compromise pour forger une MAJ valide.
-const UPDATE_PUBLIC_KEY_B64 = 'MCowBQYDK2VwAyEAjU+MOn6iCpIVAYFnejCKpqspzzxxPaqo1NeLunuRLEw=';
+const UPDATE_PUBLIC_KEY_B64 = 'MCowBQYDK2VwAyEApy2jBFEZDFA/LDjnVHRJppajQ1kC2weEq2zb9//hjxY=';
 
 // Vérifie la signature Ed25519 de `payload` (objet {version,file,sha256,size} ou
 // {version,electron,sha256,size}, sérialisé en JSON avec l'ORDRE DE CLÉS EXACT
@@ -68,7 +68,10 @@ export async function fetchLatestGithub(repo) {
   const metaAsset = assets.find((a) => a.name === 'latest.json');
   if (!metaAsset) throw new Error('Mise à jour refusée : latest.json (signature) absent de la release.');
   const meta = await fetchJson(metaAsset.url);
-  if (!meta || meta.file !== asset.name || !meta.sha256 || !meta.size) {
+  // GitHub remplace les espaces des noms d'assets par des points : on tolère cette
+  // transformation dans la comparaison (le nom reste couvert par la signature).
+  const fileMatches = meta && (meta.file === asset.name || String(meta.file).replace(/ /g, '.') === asset.name);
+  if (!meta || !fileMatches || !meta.sha256 || !meta.size) {
     throw new Error('Mise à jour refusée : latest.json incomplet ou incohérent avec l\'asset.');
   }
   const payload = { version: meta.version, file: meta.file, sha256: meta.sha256, size: meta.size };

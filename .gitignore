@@ -3,3 +3,6 @@ data/
 dist/
 release/
 .env
+# Clé privée de signature des MAJ (Ed25519) — JAMAIS committée/poussée.
+.sign-key.b64
+.sign-pub.b64

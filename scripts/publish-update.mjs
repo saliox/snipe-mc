@@ -54,7 +54,10 @@ const size = buf.length;
 fs.mkdirSync(releaseDir, { recursive: true });
 fs.copyFileSync(installerPath, path.join(releaseDir, installerName));
 
-const signedPayload = { version, file: installerName, sha256, size };
+// GitHub renomme les espaces des noms d'assets en points à l'upload : on signe et on
+// référence le nom TEL QU'IL SERA STOCKÉ, sinon meta.file != asset.name (MAJ refusée).
+const assetName = installerName.replace(/ /g, '.');
+const signedPayload = { version, file: assetName, sha256, size };
 const latest = {
   ...signedPayload,
   notes,
