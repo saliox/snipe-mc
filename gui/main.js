@@ -482,6 +482,11 @@ ipcMain.handle('bulk-check', async (_e, { names, delayMs, useToken, proxies }) =
   bulkStop = false;
   const proxyPool = (proxies && proxies.length) ? makeProxyPool(proxies) : null;
   try {
+    // Sécurité IP : si des proxies ont été fournis mais qu'AUCUN n'est valide, le pool
+    // est vide et le scanner basculerait en DIRECT (next()->null) → fuite d'IP. On refuse.
+    if (proxyPool && proxyPool.size === 0) {
+      return { ok: false, error: 'Aucun proxy valide dans ta liste — scan annulé pour ne pas exposer ton IP en direct (format attendu : host:port).' };
+    }
     let token = null;
     if (useToken) { const a = await tryGetActiveToken(); token = a?.accessToken || null; }
     const send = (ch, d) => { if (win && !win.isDestroyed()) win.webContents.send(ch, d); };

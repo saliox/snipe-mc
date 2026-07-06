@@ -103,6 +103,13 @@ export async function bulkCheck(names, opts = {}) {
     try {
       let res;
       const agent = proxyPool ? proxyPool.next() : null;
+      // Filet de sécurité IP : un pool actif sans proxy dispo ne DOIT PAS basculer en
+      // direct. On échoue le pseudo (retry) plutôt que d'exposer l'IP.
+      if (proxyPool && !agent) {
+        if (++item.attempts < MAX_ATTEMPTS) retryQ.push(item);
+        else { errors++; checked++; onResult({ done: checked, total, name: item.name, state: 'error', detail: 'aucun proxy dispo (pas de bascule directe)' }); }
+        return;
+      }
       try {
         // Sécurité : avec des proxies, un échec re-tente sur un AUTRE proxy — jamais
         // en direct. Ton IP n'est donc jamais révélée à Mojang pendant un scan proxifié.
