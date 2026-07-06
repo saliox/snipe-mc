@@ -128,10 +128,34 @@ l'installeur complet en repli, et l'installe.
 
 ```bash
 # 1. bumper la version dans package.json (ex. 1.0.0 -> 1.0.1)
-npm run publish:update "Notes de la version"   # build + crée la Release GitHub (installeur + app.zip + SHA-256)
+export SNIPE_MC_SIGN_KEY=...   # clé privée Ed25519 de signature (voir "Signature des mises à jour" plus bas)
+npm run publish:update "Notes de la version"   # build + crée la Release GitHub (installeur + app.zip + SHA-256 signé)
 ```
 
 C'est tout : les apps installées récupèrent la MAJ au prochain lancement.
+
+### Signature des mises à jour
+
+Le SHA-256 seul ne suffit plus : avant, il était servi par la MÊME release GitHub que
+le binaire (`digest` de l'API ou `latest.json`), donc un compte/PAT GitHub compromis
+pouvait publier un binaire malveillant ET l'empreinte qui le "valide" en même temps.
+`latest.json`/`app-update.json` portent maintenant une **signature Ed25519**, vérifiée
+côté client avec une clé publique figée dans `src/updatecore.js` — indépendante du
+compte GitHub. Sans signature valide, la mise à jour est **refusée** (fail-safe, comme
+pour le SHA-256).
+
+`SNIPE_MC_SIGN_KEY` est la clé privée correspondante (base64, PKCS8 DER) : **à garder
+secrète, jamais dans le dépôt, jamais sur GitHub** (gestionnaire de mots de passe ou
+coffre-fort recommandé). Pour en générer une nouvelle (ex. rotation) :
+
+```bash
+node -e "const c=require('crypto');const{publicKey,privateKey}=c.generateKeyPairSync('ed25519');console.log('PUB',publicKey.export({type:'spki',format:'der'}).toString('base64'));console.log('PRIV',privateKey.export({type:'pkcs8',format:'der'}).toString('base64'))"
+```
+
+Colle `PUB` dans `UPDATE_PUBLIC_KEY_B64` (`src/updatecore.js`), garde `PRIV` pour
+`SNIPE_MC_SIGN_KEY`. Toute rotation de clé casse la MAJ automatique des installations
+existantes tant qu'elles n'ont pas reçu le nouveau `UPDATE_PUBLIC_KEY_B64` — donc à ne
+faire qu'en cas de compromission suspectée.
 
 ### Côté client
 
@@ -141,11 +165,10 @@ C'est tout : les apps installées récupèrent la MAJ au prochain lancement.
 **« vérifier les MAJ »** aussi dans l'en-tête. Le `.env` ne sert qu'à `MS_CLIENT_ID`
 (optionnel, pour le login Microsoft) — **il ne contient aucune adresse.**
 
-- Intégrité vérifiée par **SHA-256** (le fichier est rejeté s'il ne correspond pas).
+- Intégrité vérifiée par **SHA-256 + signature Ed25519** (le fichier est rejeté si l'un
+  des deux ne correspond pas).
 - Override avancé possible via `.env` : `UPDATE_REPO=owner/name` pour pointer un autre
   dépôt GitHub (jamais une IP).
-- L'installeur étant **non signé**, la MAJ n'est pas authentifiée cryptographiquement
-  au-delà du SHA-256 : la confiance repose sur le dépôt GitHub source.
 
 ## CLI
 

@@ -110,14 +110,14 @@ export async function bulkCheck(names, opts = {}) {
         if (proxyPool) proxyPool.reward(agent); // ce proxy a répondu
       } catch (e) {
         if (proxyPool) proxyPool.penalize(agent); // proxy mort -> vers l'éjection
-        if (item.attempts++ < MAX_ATTEMPTS) retryQ.push(item);
+        if (++item.attempts < MAX_ATTEMPTS) retryQ.push(item);
         else { errors++; checked++; onResult({ done: checked, total, name: item.name, state: 'error', detail: e.message }); }
         return;
       }
 
       if (res.rateLimited) {
         onThrottle(res.retryAfter);
-        if (item.attempts++ < MAX_ATTEMPTS) retryQ.push(item);
+        if (++item.attempts < MAX_ATTEMPTS) retryQ.push(item);
         else { errors++; checked++; onResult({ done: checked, total, name: item.name, state: 'error', detail: 'rate-limité (abandon)' }); }
         return;
       }
