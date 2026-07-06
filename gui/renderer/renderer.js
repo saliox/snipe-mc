@@ -43,11 +43,15 @@ function cprint(level, msg) {
 function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 window.api.onLog((e) => cprint(e.level, e.msg));
 $('clearLogs').onclick = () => { logBox.innerHTML = ''; };
+// Copie du texte dans le presse-papiers + retour console (helper partagé).
+async function copyToClipboard(text, okMsg) {
+  const r = await window.api.clipboardWrite(text);
+  cprint(r && r.ok ? 'ok' : 'err', r && r.ok ? okMsg : 'Copie échouée.');
+}
 $('copyLogs').onclick = async () => {
   const text = [...logBox.children].map((l) => l.textContent).join('\n');
   if (!text.trim()) { cprint('warn', 'Console vide.'); return; }
-  const r = await window.api.clipboardWrite(text);
-  cprint(r && r.ok ? 'ok' : 'err', r && r.ok ? 'Console copiée dans le presse-papiers.' : 'Copie échouée.');
+  await copyToClipboard(text, 'Console copiée dans le presse-papiers.');
 };
 
 // ----- Version + compte -----
@@ -160,6 +164,8 @@ let freeList = [];
 let allResults = new Map(); // name.toLowerCase() -> { name, state, detail }
 let lastNames = [];
 let tally = { free: 0, taken: 0, error: 0 }; // cumul (multi-batch / reprise / illimité)
+// Repart d'une session de résultats vierge (nouvelle passe de scan).
+function resetBulkResults() { freeList = []; allResults = new Map(); tally = { free: 0, taken: 0, error: 0 }; }
 function bulkNamesArray() { return $('bulkNames').value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean); }
 function proxiesArray() { return $('proxies').value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean); }
 function updateBulkCount() {
@@ -240,7 +246,7 @@ async function runBulk(names, { silent = false, recheck = false } = {}) {
 
 $('bulkBtn').onclick = () => {
   if (scanActive()) { cprint('warn', 'Un scan est déjà en cours — stoppe-le (STOP / Échap) avant d\'en relancer un.'); return; }
-  freeList = []; allResults = new Map(); tally = { free: 0, taken: 0, error: 0 };
+  resetBulkResults();
   resumeUnlimited = false;            // nouvelle session bulk (pas une reprise ∞)
   lastNames = bulkNamesArray();       // nouvelle liste complète suivie
   runBulk(lastNames);
@@ -268,7 +274,7 @@ $('resumeBtn').onclick = () => {
   } else {
     // Session déjà terminée -> on RELANCE la liste complète (nouvelle passe).
     cprint('step', `Relance de la dernière liste (${lastNames.length} pseudos)…`);
-    freeList = []; allResults = new Map(); tally = { free: 0, taken: 0, error: 0 };
+    resetBulkResults();
     runBulk(lastNames);
   }
 };
@@ -278,8 +284,7 @@ $('copyFreeBtn').onclick = async () => {
   // Copie la vue courante des libres (filtrée « pépites » si activé), sinon la liste brute.
   const list = rankedFreeCache.length ? displayedFree().map((x) => x.name) : freeList.slice();
   if (!list.length) { cprint('warn', 'Aucun pseudo libre à copier.'); return; }
-  const r = await window.api.clipboardWrite(list.join('\n'));
-  cprint(r && r.ok ? 'ok' : 'err', r && r.ok ? `${list.length} pseudos libres copiés dans le presse-papiers.` : 'Copie échouée.');
+  await copyToClipboard(list.join('\n'), `${list.length} pseudos libres copiés dans le presse-papiers.`);
 };
 $('exportCsvBtn').onclick = async () => {
   if (!allResults.size) { cprint('warn', 'Aucun résultat à exporter (lance un check).'); return; }
@@ -293,7 +298,7 @@ $('exportCsvBtn').onclick = async () => {
 // Efface les résultats affichés + la session de reprise (sans redémarrer l'app).
 $('clearResultsBtn').onclick = async () => {
   if (scanActive()) { cprint('warn', 'Stoppe le scan (STOP / Échap) avant de vider.'); return; }
-  freeList = []; allResults = new Map(); tally = { free: 0, taken: 0, error: 0 };
+  resetBulkResults();
   rankedFreeCache = []; gemAlerted.clear();
   $('freeChips').innerHTML = ''; $('gemCount').textContent = '';
   $('claimBestBtn').classList.add('hidden');
@@ -344,8 +349,7 @@ $('freeChips').addEventListener('contextmenu', async (e) => {
   const chip = e.target.closest('.chip');
   if (!chip) return;
   e.preventDefault();
-  const r = await window.api.clipboardWrite(chip.dataset.name);
-  cprint(r && r.ok ? 'ok' : 'err', r && r.ok ? `${chip.dataset.name} copié.` : 'Copie échouée.');
+  await copyToClipboard(chip.dataset.name, `${chip.dataset.name} copié.`);
 });
 $('claimBestBtn').onclick = () => { const d = displayedFree(); if (d[0]) claimName(d[0].name); };
 $('gemsOnly').onchange = refreshFreeView;
@@ -609,7 +613,7 @@ async function startUnlimited(fresh) {
   autoClaimDone = false;
   resumeUnlimited = false; // on lance/reprend : plus une proposition en attente
   unlimitedThreshold = Number($('unlimitedThreshold').value) || 0;
-  if (fresh) { freeList = []; allResults = new Map(); tally = { free: 0, taken: 0, error: 0 }; }
+  if (fresh) { resetBulkResults(); }
   lastNames = [];
   uniStart = Date.now();
   uniBaseCount = allResults.size; // pour un débit correct (checkés SINCE reprise)
