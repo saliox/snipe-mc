@@ -283,6 +283,18 @@ $('exportCsvBtn').onclick = async () => {
   if (r.canceled) return;
   if (r.ok) cprint('ok', `${allResults.size} résultats (CSV) → ${r.path}`);
 };
+// Efface les résultats affichés + la session de reprise (sans redémarrer l'app).
+$('clearResultsBtn').onclick = async () => {
+  freeList = []; allResults = new Map(); tally = { free: 0, taken: 0, error: 0 };
+  rankedFreeCache = []; gemAlerted.clear();
+  $('freeChips').innerHTML = ''; $('gemCount').textContent = '';
+  $('claimBestBtn').classList.add('hidden');
+  $('bulkStats').textContent = ''; $('bulkEta').textContent = ''; $('unlimitedInfo').textContent = '';
+  $('bulkProgress').classList.add('hidden'); $('bulkBar').style.width = '0%';
+  $('resumeBtn').disabled = true;
+  await window.api.checkpointClear();
+  cprint('info', 'Résultats effacés (session de reprise incluse).');
+};
 
 // Classe les libres par désirabilité (meilleurs d'abord) ; repli si l'IPC échoue.
 async function rankedFree() {
