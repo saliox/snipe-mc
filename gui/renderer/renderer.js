@@ -847,8 +847,12 @@ $('checkUpdateLink').onclick = async (e) => { e.preventDefault(); $('updateText'
 $('updateBtn').onclick = async () => { $('updateBtn').disabled = true; const r = await window.api.updateApply(); if (!r.ok) { $('updateBtn').disabled = false; $('updateText').textContent = 'échec: ' + r.error; } };
 window.api.onUpdateStatus((s) => {
   const b = $('updateBanner'), btn = $('updateBtn');
-  const show = (t, showBtn) => { $('updateText').textContent = t; b.classList.remove('hidden'); btn.classList.toggle('hidden', !showBtn); };
-  if (s.state === 'available') { show(`Nouvelle version ${s.version} dispo (tu as ${s.current}).`, true); btn.disabled = false; $('updateProgress').classList.add('hidden'); }
+  const show = (t, showBtn) => { $('updateText').textContent = t; $('updateText').title = ''; b.classList.remove('hidden'); btn.classList.toggle('hidden', !showBtn); };
+  if (s.state === 'available') {
+    show(`Nouvelle version ${s.version} dispo (tu as ${s.current}).`, true);
+    $('updateText').title = (s.notes || '').trim() || `Snipe MC ${s.version}`; // notes au survol
+    btn.disabled = false; $('updateProgress').classList.add('hidden');
+  }
   else if (s.state === 'downloading') { show('téléchargement…', false); $('updateProgress').classList.remove('hidden'); }
   else if (s.state === 'installing') { show('installation… redémarrage imminent.', false); }
   else if (s.state === 'uptodate') { show(`à jour (v${s.current}).`, false); setTimeout(() => b.classList.add('hidden'), 4000); }
