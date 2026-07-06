@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('api', {
   changeUsername: (name) => ipcRenderer.invoke('change-username', name),
   nameChangeInfo: () => ipcRenderer.invoke('namechange-info'),
   ntp: () => ipcRenderer.invoke('ntp'),
+  measureLatency: () => ipcRenderer.invoke('measure-latency'),
 
   generate: (opts) => ipcRenderer.invoke('generate', opts),
   variants: (base) => ipcRenderer.invoke('variants', base),

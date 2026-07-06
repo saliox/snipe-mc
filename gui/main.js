@@ -301,6 +301,30 @@ ipcMain.handle('ntp', async () => {
   catch (e) { return { ok: false, error: e.message }; }
 });
 
+// Mesure la latence réseau vers l'hôte de changement de nom (api.minecraftservices.com).
+// Connexion réchauffée (on ignore la 1re requête = handshake TLS) pour refléter la
+// latence réelle d'un snipe (le moteur pré-chauffe les sockets). Sert à régler `lead`
+// (avance de tir ≈ latence aller ≈ RTT/2). Pas besoin de token (le statut importe peu).
+ipcMain.handle('measure-latency', async () => {
+  try {
+    const url = 'https://api.minecraftservices.com/minecraft/profile';
+    const rtts = [];
+    for (let i = 0; i < 6; i++) {
+      const t = Date.now();
+      try {
+        const { body } = await request(url, { method: 'GET', headersTimeout: 5000, bodyTimeout: 5000 });
+        await body.dump();
+        if (i > 0) rtts.push(Date.now() - t); // i=0 = handshake, ignoré
+      } catch { /* mesure ratée, on continue */ }
+      await sleep(150);
+    }
+    if (!rtts.length) return { ok: false, error: 'aucune mesure aboutie' };
+    rtts.sort((a, b) => a - b);
+    const median = rtts[Math.floor(rtts.length / 2)];
+    return { ok: true, min: rtts[0], median, samples: rtts };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+
 ipcMain.handle('check', async (_e, name) => {
   try {
     const out = { ok: true, name, valid: validName(name) };

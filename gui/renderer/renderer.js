@@ -777,6 +777,19 @@ $('ntpBtn').onclick = async () => {
     cprint('ok', txt);
   } else { $('ntpInfo').textContent = ''; cprint('err', 'NTP: ' + r.error); }
 };
+// Mesure la latence Mojang et règle le lead (avance de tir ≈ latence aller ≈ RTT/2).
+$('latencyBtn').onclick = async () => {
+  $('ntpInfo').textContent = 'mesure latence…';
+  cprint('step', 'Mesure latence Mojang…');
+  const r = await window.api.measureLatency();
+  if (!r.ok) { $('ntpInfo').innerHTML = `<span class="bad">${esc(r.error)}</span>`; cprint('err', 'Latence: ' + r.error); return; }
+  const lead = Math.max(0, Math.round(r.median / 2));
+  $('lead').value = lead;
+  savePrefs();
+  const txt = `latence Mojang : médiane ${r.median}ms (min ${r.min}) → lead réglé à ${lead}ms`;
+  $('ntpInfo').textContent = txt;
+  cprint('ok', txt);
+};
 
 // ----- Snipe -----
 let countdownTimer = null;
