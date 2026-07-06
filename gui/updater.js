@@ -122,11 +122,18 @@ function applyAppZip(zipPath, version) {
   const q = (s) => String(s).replace(/'/g, "''");
   const exe = process.execPath;
   const resourcesDir = process.resourcesPath; // <install>\resources
+  const appPid = process.pid;
   // Nom de script imprévisible (voir dest plus haut, même raison).
   const ps = path.join(os.tmpdir(), `snipemc-appupdate-${crypto.randomUUID()}.ps1`);
   const script =
     "$ErrorActionPreference='SilentlyContinue'\r\n" +
-    'Start-Sleep -Seconds 1\r\n' +
+    // Attendre la SORTIE RÉELLE du process (pas un sleep fixe) : sinon l'extraction
+    // tourne pendant que l'app tient encore ses fichiers (electron + node_modules) et
+    // échoue en silence -> MAJ non appliquée. + marge pour la libération des handles.
+    `$appPid = ${appPid}\r\n` +
+    '$deadline = (Get-Date).AddSeconds(30)\r\n' +
+    'while ((Get-Process -Id $appPid -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 200 }\r\n' +
+    'Start-Sleep -Milliseconds 800\r\n' +
     // Anti zip-slip : System.IO.Compression.ZipFile (.NET Framework, utilisé par
     // Expand-Archive sous Windows PowerShell 5.1) ne rejette PAS les entrées portant
     // un chemin "..\" ou absolu comme le fait .NET Core -> on les rejette nous-mêmes
@@ -138,14 +145,27 @@ function applyAppZip(zipPath, version) {
     'foreach ($e in $zip.Entries) { if ($e.FullName -match "(^|[\\\\/])\\.\\.([\\\\/]|$)" -or [System.IO.Path]::IsPathRooted($e.FullName)) { $bad = $true; break } }\r\n' +
     '$zip.Dispose()\r\n' +
     'if ($bad) { exit 1 }\r\n' +
-    `Expand-Archive -Path '${q(zipPath)}' -DestinationPath '${q(resourcesDir)}' -Force\r\n` +
+    // Retry : si un handle traîne encore, on retente quelques fois plutôt que d'échouer.
+    '$done = $false\r\n' +
+    `for ($i = 0; $i -lt 6 -and -not $done; $i++) { try { Expand-Archive -Path '${q(zipPath)}' -DestinationPath '${q(resourcesDir)}' -Force -ErrorAction Stop; $done = $true } catch { Start-Sleep -Milliseconds 700 } }\r\n` +
+    'if (-not $done) { exit 2 }\r\n' +
     // Aligne la version affichée dans « Applications installées ».
     `Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\SnipeMC' -Name DisplayVersion -Value '${q(version || '')}'\r\n` +
     `Start-Process -FilePath '${q(exe)}'\r\n`;
   fs.writeFileSync(ps, script);
-  const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps], { detached: true, stdio: 'ignore', windowsHide: true });
-  child.unref();
+  launchDetached(`powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "${ps}"`);
   setTimeout(() => app.quit(), 400);
+}
+
+// Lance une commande DÉTACHÉE qui SURVIT à la fermeture de l'app. Sur Windows,
+// un enfant spawné directement hérite du « job object » d'Electron (kill-on-close)
+// et est tué quand l'app quitte -> le script de MAJ ne s'exécutait jamais. `cmd start`
+// crée un process qui rompt le job et survit.
+function launchDetached(commandLine) {
+  const child = spawn('cmd.exe', ['/c', `start "" /min ${commandLine}`], {
+    detached: true, stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: true,
+  });
+  child.unref();
 }
 
 // Lance l'installeur en silencieux via un script détaché qui attend la fin de
@@ -160,8 +180,7 @@ function quitAndInstall(installerPath) {
     `"${installerPath}" /S\r\n` +
     `start "" "${exe}"\r\n`;
   fs.writeFileSync(script, body);
-  const child = spawn('cmd.exe', ['/c', script], { detached: true, stdio: 'ignore', windowsHide: true });
-  child.unref();
+  launchDetached(`"${script}"`);
   setTimeout(() => app.quit(), 400);
 }
 

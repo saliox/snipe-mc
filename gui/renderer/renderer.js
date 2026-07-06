@@ -43,6 +43,12 @@ function cprint(level, msg) {
 function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 window.api.onLog((e) => cprint(e.level, e.msg));
 $('clearLogs').onclick = () => { logBox.innerHTML = ''; };
+$('copyLogs').onclick = async () => {
+  const text = [...logBox.children].map((l) => l.textContent).join('\n');
+  if (!text.trim()) { cprint('warn', 'Console vide.'); return; }
+  const r = await window.api.clipboardWrite(text);
+  cprint(r && r.ok ? 'ok' : 'err', r && r.ok ? 'Console copiée dans le presse-papiers.' : 'Copie échouée.');
+};
 
 // ----- Version + compte -----
 window.api.appVersion().then((v) => { $('appVer').textContent = 'v' + v; });
