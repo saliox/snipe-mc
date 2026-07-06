@@ -790,6 +790,18 @@ $('latencyBtn').onclick = async () => {
   $('ntpInfo').textContent = txt;
   cprint('ok', txt);
 };
+// Pré-vol : compte connecté + cooldown de changement + réglages, d'un coup d'œil.
+$('readyBtn').onclick = async () => {
+  $('readyInfo').textContent = 'vérif…';
+  const [who, cd] = await Promise.all([window.api.whoami(), window.api.nameChangeInfo()]);
+  const parts = [];
+  parts.push(who.profile ? `<span class="ok">✔ ${esc(who.profile.name)}</span>` : '<span class="bad">✗ non connecté</span>');
+  if (cd.ok && cd.allowed) parts.push('<span class="ok">✔ changement autorisé</span>');
+  else if (cd.ok && cd.availableAt) parts.push(`<span class="bad">✗ cooldown : ${esc(fmtDur(cd.availableAt - Date.now()))}</span>`);
+  else parts.push('<span class="muted">cooldown : token requis</span>');
+  parts.push(`<span class="muted">lead ${esc($('lead').value)}ms · burst ${esc($('burst').value)}</span>`);
+  $('readyInfo').innerHTML = parts.join(' · ');
+};
 
 // ----- Snipe -----
 let countdownTimer = null;
