@@ -233,6 +233,7 @@ async function runBulk(names, { silent = false, recheck = false } = {}) {
 }
 
 $('bulkBtn').onclick = () => {
+  if (scanActive()) { cprint('warn', 'Un scan est déjà en cours — stoppe-le (STOP / Échap) avant d\'en relancer un.'); return; }
   freeList = []; allResults = new Map(); tally = { free: 0, taken: 0, error: 0 };
   resumeUnlimited = false;            // nouvelle session bulk (pas une reprise ∞)
   lastNames = bulkNamesArray();       // nouvelle liste complète suivie
@@ -285,6 +286,7 @@ $('exportCsvBtn').onclick = async () => {
 };
 // Efface les résultats affichés + la session de reprise (sans redémarrer l'app).
 $('clearResultsBtn').onclick = async () => {
+  if (scanActive()) { cprint('warn', 'Stoppe le scan (STOP / Échap) avant de vider.'); return; }
   freeList = []; allResults = new Map(); tally = { free: 0, taken: 0, error: 0 };
   rankedFreeCache = []; gemAlerted.clear();
   $('freeChips').innerHTML = ''; $('gemCount').textContent = '';
@@ -541,6 +543,13 @@ function setBulkRunning(on) {
   $('bulkStopBtn').classList.toggle('hidden', !on);
   $('resumeBtn').disabled = on; // désactivé pendant le scan, réactivé après (session dispo)
   $('genUnlimitedBtn').disabled = on;
+}
+// Un scan (bulk ou illimité) est-il en cours ? Empêche les lancements concurrents
+// déclenchés par programme (VARIANTES / REVÉRIFIER appellent bulkBtn.click()).
+function scanActive() {
+  return unlimited
+    || !$('bulkStopBtn').classList.contains('hidden')
+    || !$('genUnlimitedStopBtn').classList.contains('hidden');
 }
 
 // ----- Scan illimité (génère + check en boucle jusqu'au stop ou au seuil) -----

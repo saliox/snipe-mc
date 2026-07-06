@@ -44,6 +44,7 @@ import { initUpdater, checkForUpdates, applyUpdate } from './updater.js';
 
 let win;
 let bulkStop = false;
+let bulkBusy = false; // un bulk-check est en cours (anti-concurrence)
 let tray = null;
 app.isQuitting = false;
 const monitor = { on: false, timer: null, ticking: false, notified: new Set(), autoclaim: false };
@@ -450,6 +451,10 @@ ipcMain.handle('save-txt', async (_e, { suggested, content }) => {
 
 // --- Check en masse ---
 ipcMain.handle('bulk-check', async (_e, { names, delayMs, useToken, proxies }) => {
+  // Anti-concurrence : deux scans simultanés partageraient bulkStop + émettraient
+  // des résultats entrelacés (progression/historique corrompus).
+  if (bulkBusy) return { ok: false, error: 'Un scan est déjà en cours.' };
+  bulkBusy = true;
   bulkStop = false;
   const proxyPool = (proxies && proxies.length) ? makeProxyPool(proxies) : null;
   try {
@@ -467,7 +472,7 @@ ipcMain.handle('bulk-check', async (_e, { names, delayMs, useToken, proxies }) =
     if (proxyPool) summary.proxies = proxyPool.size;
     return { ok: true, summary };
   } catch (e) { return { ok: false, error: e.message }; }
-  finally { if (proxyPool) await proxyPool.close(); }
+  finally { bulkBusy = false; if (proxyPool) await proxyPool.close(); }
 });
 ipcMain.handle('bulk-stop', () => { bulkStop = true; return { ok: true }; });
 
