@@ -8,6 +8,7 @@
     "snipemc": "src/index.js"
   },
   "scripts": {
+    "test": "node --test",
     "cli": "node src/index.js",
     "login": "node src/index.js login",
     "start": "electron .",
