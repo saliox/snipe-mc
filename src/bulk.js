@@ -129,8 +129,8 @@ export async function bulkCheck(names, opts = {}) {
         return;
       }
 
-      onSuccess();
       if (res.free === true) {
+        onSuccess(); // vraie réponse exploitable -> justifie d'accélérer
         free++; freeList.push(item.name); checked++;
         // Le tag [LIBRE] porte déjà l'info : on ne détaille que le statut compte.
         let detail = '';
@@ -142,9 +142,13 @@ export async function bulkCheck(names, opts = {}) {
         }
         onResult({ done: checked, total, name: item.name, state: 'free', detail });
       } else if (res.free === false) {
+        onSuccess(); // vraie réponse exploitable -> justifie d'accélérer
         taken++; checked++;
         onResult({ done: checked, total, name: item.name, state: 'taken', detail: '' });
       } else {
+        // Statut HTTP inattendu (ni 200/404 ni 429) : c'est un ÉCHEC, pas un succès —
+        // onSuccess() ne doit PAS être appelé ici, sinon une série d'erreurs serveur
+        // (ex. 500) accélère la cadence au lieu de la freiner.
         errors++; checked++;
         onResult({ done: checked, total, name: item.name, state: 'error', detail: `HTTP ${res.statusCode || '?'}` });
       }
