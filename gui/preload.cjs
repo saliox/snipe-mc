@@ -44,7 +44,7 @@ contextBridge.exposeInMainWorld('api', {
   watchAdd: (names) => ipcRenderer.invoke('watch-add', names),
   watchRemove: (name) => ipcRenderer.invoke('watch-remove', name),
   watchClear: () => ipcRenderer.invoke('watch-clear'),
-  monitorStart: () => ipcRenderer.invoke('monitor-start'),
+  monitorStart: (proxies) => ipcRenderer.invoke('monitor-start', proxies),
   monitorStop: () => ipcRenderer.invoke('monitor-stop'),
   monitorStatus: () => ipcRenderer.invoke('monitor-status'),
   monitorAutoclaim: (v) => ipcRenderer.invoke('monitor-autoclaim', v),

@@ -216,6 +216,9 @@ export async function loginInteractive(onPrompt) {
   return mc;
 }
 
+// Verrou mono-vol pour le rafraîchissement : voir getValidToken() ci-dessous.
+let refreshInflight = null;
+
 // Renvoie un token Minecraft valide, en rafraîchissant silencieusement si besoin.
 export async function getValidToken() {
   const cache = loadCache();
@@ -226,16 +229,33 @@ export async function getValidToken() {
   }
 
   if (!cache.msRefreshToken) throw new Error('Token expiré, refresh indisponible. Relance login.');
-  log.info('Token Minecraft expiré, rafraîchissement...');
-  const msTok = await refreshMsToken(cache.msRefreshToken);
-  const mc = await msToMinecraft(msTok.access_token);
-  saveCache({
-    msRefreshToken: msTok.refresh_token || cache.msRefreshToken,
-    accessToken: mc.accessToken,
-    expiresAt: mc.expiresAt,
-    profile: mc.profile,
-  });
-  return { accessToken: mc.accessToken, profile: mc.profile };
+
+  // Garde mono-vol : deux appelants concurrents (ex. un 401 pendant une rafale de
+  // snipe qui court-circuite un tick d'auto-claim en parallèle) ne doivent JAMAIS
+  // lancer deux rafraîchissements avec le même refresh_token. Azure AD fait
+  // souvent tourner (rotation) le refresh token à l'usage et invalide l'ancien :
+  // le perdant récolterait un invalid_grant, et la dernière écriture de cache
+  // écraserait silencieusement le token que l'autre venait d'obtenir. On partage
+  // donc la même Promise en vol au lieu d'en démarrer une nouvelle par appelant.
+  if (refreshInflight) return refreshInflight;
+
+  refreshInflight = (async () => {
+    log.info('Token Minecraft expiré, rafraîchissement...');
+    const msTok = await refreshMsToken(cache.msRefreshToken);
+    const mc = await msToMinecraft(msTok.access_token);
+    saveCache({
+      msRefreshToken: msTok.refresh_token || cache.msRefreshToken,
+      accessToken: mc.accessToken,
+      expiresAt: mc.expiresAt,
+      profile: mc.profile,
+    });
+    return { accessToken: mc.accessToken, profile: mc.profile };
+  })();
+  try {
+    return await refreshInflight;
+  } finally {
+    refreshInflight = null;
+  }
 }
 
 export function cachedProfile() {

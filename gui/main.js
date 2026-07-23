@@ -29,7 +29,7 @@ import * as watchlist from './watchlist.js';
 import { loginInteractive, cachedProfile, getValidToken } from '../src/auth.js';
 import { isNameFree, nameStatus, validName } from '../src/mojang.js';
 import { changeName, nameChangeInfo } from '../src/nameapi.js';
-import { snipe, requestStop } from '../src/sniper.js';
+import { snipe, requestStop, createStopToken } from '../src/sniper.js';
 import { bestOffset } from '../src/ntp.js';
 import { bulkCheck } from '../src/bulk.js';
 import { generateNames, spaceSize, nameVariants } from '../src/generate.js';
@@ -45,9 +45,16 @@ import { initUpdater, checkForUpdates, applyUpdate } from './updater.js';
 let win;
 let bulkStop = false;
 let bulkBusy = false; // un bulk-check est en cours (anti-concurrence)
+// Jeton d'arrêt du run de snipe courant (voir sniper.js: createStopToken/requestStop).
+// Un seul run "logique" à la fois côté UI (bouton start/stop unique) : tous les
+// snipe() sous-jacents d'un même appel IPC 'snipe' (multi-comptes/multi-cibles)
+// partagent CE jeton, mais un nouveau run n'écrase jamais l'arrêt d'un run
+// précédent encore en cours (chacun a son propre jeton local).
+let activeStopToken = null;
 let tray = null;
 app.isQuitting = false;
-const monitor = { on: false, timer: null, ticking: false, notified: new Set(), autoclaim: false };
+const monitor = { on: false, timer: null, ticking: false, notified: new Set(), autoclaim: false, proxyPool: null };
+let lastMonitorProxies = []; // dernière liste connue (réutilisée par le tray, qui n'a pas accès au renderer)
 
 const ICON = path.join(__dirname, '..', 'build', 'icon.png');
 
@@ -126,8 +133,19 @@ function updateTray() {
 function notifyFree(name) {
   try { new Notification({ title: '🎯 Pseudo libre !', body: `${name} est disponible`, icon: fs.existsSync(ICON) ? ICON : undefined }).show(); } catch {}
 }
-function startMonitor() {
-  if (monitor.on) return;
+// proxies : mêmes lignes que le bulk-check (host:port, …). Optionnel — la
+// veille marche aussi en direct si aucun proxy n'est configuré.
+// Renvoie { ok, error? } : refuse de démarrer plutôt que de fuiter l'IP si des
+// proxies ont été fournis mais qu'aucun n'est valide (même garde que bulk-check).
+function startMonitor(proxies) {
+  if (monitor.on) return { ok: true };
+  const list = proxies !== undefined ? proxies : lastMonitorProxies;
+  lastMonitorProxies = list || [];
+  const pool = (list && list.length) ? makeProxyPool(list) : null;
+  if (pool && pool.size === 0) {
+    return { ok: false, error: 'Aucun proxy valide dans ta liste — veille non démarrée pour ne pas exposer ton IP en direct (format attendu : host:port).' };
+  }
+  monitor.proxyPool = pool;
   monitor.on = true;
   monitor.notified.clear();
   // .catch aux points d'appel : monitorTick est async et lancé par setInterval,
@@ -136,10 +154,12 @@ function startMonitor() {
   monitorTick().catch((e) => console.error('[monitor] tick:', e));
   updateTray();
   if (win && !win.isDestroyed()) win.webContents.send('monitor-status', { on: true });
+  return { ok: true };
 }
 function stopMonitor() {
   monitor.on = false;
   clearInterval(monitor.timer); monitor.timer = null;
+  if (monitor.proxyPool) { monitor.proxyPool.close().catch(() => {}); monitor.proxyPool = null; }
   updateTray();
   if (win && !win.isDestroyed()) win.webContents.send('monitor-status', { on: false });
 }
@@ -149,7 +169,23 @@ async function monitorTick() {
   try {
     for (const name of watchlist.getWatch()) {
       if (!monitor.on) break;
-      let res; try { res = await isNameFree(name); } catch { res = null; }
+      let res = null;
+      const pool = monitor.proxyPool;
+      const agent = pool ? pool.next() : null;
+      // Même garde que le bulk-check : un pool configuré mais sans proxy dispo ne
+      // doit JAMAIS basculer en direct (sinon fuite d'IP réelle). On saute ce nom
+      // pour ce passage plutôt que d'appeler l'API en clair.
+      if (pool && !agent) {
+        res = null;
+      } else {
+        try {
+          res = await isNameFree(name, agent);
+          if (pool) pool.reward(agent);
+        } catch {
+          if (pool) pool.penalize(agent);
+          res = null;
+        }
+      }
       const key = name.toLowerCase();
       // Repris depuis la dernière notif → on réarme pour re-notifier au prochain
       // drop (sinon un pseudo notifié une fois n'alerte plus jamais).
@@ -383,7 +419,10 @@ ipcMain.handle('watch-get', () => { try { return { ok: true, names: watchlist.ge
 ipcMain.handle('watch-add', (_e, names) => { try { const arr = Array.isArray(names) ? names : [names]; return { ok: true, names: watchlist.addWatch(arr) }; } catch (e) { return { ok: false, error: e.message }; } });
 ipcMain.handle('watch-remove', (_e, name) => { try { return { ok: true, names: watchlist.removeWatch(name) }; } catch (e) { return { ok: false, error: e.message }; } });
 ipcMain.handle('watch-clear', () => { try { return { ok: true, names: watchlist.clearWatch() }; } catch (e) { return { ok: false, error: e.message }; } });
-ipcMain.handle('monitor-start', () => { startMonitor(); return { ok: true, on: monitor.on }; });
+ipcMain.handle('monitor-start', (_e, proxies) => {
+  const r = startMonitor(Array.isArray(proxies) ? proxies : undefined);
+  return { ...r, on: monitor.on };
+});
 ipcMain.handle('monitor-stop', () => { stopMonitor(); return { ok: true, on: monitor.on }; });
 ipcMain.handle('monitor-status', () => ({ ok: true, on: monitor.on, autoclaim: monitor.autoclaim }));
 ipcMain.handle('monitor-autoclaim', (_e, v) => { monitor.autoclaim = !!v; return { ok: true, autoclaim: monitor.autoclaim }; });
@@ -539,6 +578,11 @@ ipcMain.handle('test-proxies', async (_e, lines) => {
 
 // --- Snipe ---
 ipcMain.handle('snipe', async (_e, opts) => {
+  // Jeton propre à CE run (voir déclaration d'activeStopToken plus haut) : ni
+  // partagé au niveau module de sniper.js, ni écrasable par un run qui démarrerait
+  // pendant que celui-ci tourne encore.
+  const stopToken = createStopToken();
+  activeStopToken = stopToken;
   try {
     if (!validName(opts.name)) return { ok: false, error: 'Pseudo invalide (3-16 car., [A-Za-z0-9_]).' };
     const common = {
@@ -550,6 +594,7 @@ ipcMain.handle('snipe', async (_e, opts) => {
       leadMs: opts.leadMs,
       connections: opts.connections,
       skipNtp: !!opts.skipNtp,
+      stopToken,
     };
 
     // Multi-comptes : tire depuis tous les comptes enregistrés en parallèle.
@@ -594,6 +639,12 @@ ipcMain.handle('snipe', async (_e, opts) => {
     const result = await snipe({ ...common, token: active.accessToken, getToken });
     return { ok: true, result };
   } catch (e) { return { ok: false, error: e.message }; }
+  finally {
+    // Ne nettoie que SI c'est encore notre jeton (garde théorique — l'UI ne lance
+    // qu'un run à la fois — mais évite d'effacer par erreur la référence d'un run
+    // plus récent si jamais deux appels IPC se chevauchaient).
+    if (activeStopToken === stopToken) activeStopToken = null;
+  }
 });
 
-ipcMain.handle('stop', () => { requestStop(); return { ok: true }; });
+ipcMain.handle('stop', () => { requestStop(activeStopToken); return { ok: true }; });

@@ -7,8 +7,15 @@ import { bestOffset } from './ntp.js';
 const HOST = 'https://api.minecraftservices.com';
 
 // Arrêt coopératif (utilisé par l'UI pour stopper le mode surveillance).
-let stopFlag = false;
-export function requestStop() { stopFlag = true; }
+// Jeton PAR APPEL à snipe() — jamais un flag partagé au niveau module : sinon
+// plusieurs snipe() concurrents (multi-comptes, multi-cibles, ou simplement deux
+// sessions distinctes) se marchent dessus — un nouveau run réinitialiserait
+// silencieusement l'arrêt demandé sur un run plus ancien encore en cours, et un
+// requestStop() global stopperait TOUS les runs au lieu du seul visé.
+export function createStopToken() { return { stopped: false }; }
+export function requestStop(stopToken) {
+  if (stopToken && typeof stopToken === 'object') stopToken.stopped = true;
+}
 
 // Pré-établit `n` connexions TLS pour éliminer le handshake du chemin critique.
 async function warmup(pool, token, n) {
@@ -32,6 +39,12 @@ async function attempt(pool, name, token) {
     path: `/minecraft/profile/name/${encodeURIComponent(name)}`,
     method: 'PUT',
     headers: { authorization: `Bearer ${token}` },
+    // Comme isNameFree (mojang.js) : sans ça, undici attend jusqu'à ~5 min par
+    // défaut sur une connexion qui traîne, ce qui peut bloquer Promise.all(inflight)
+    // (donc le rapport de succès + la fermeture du pool) bien après qu'un gagnant
+    // soit déjà connu.
+    headersTimeout: 8000,
+    bodyTimeout: 8000,
   });
   const retryAfter = headers['retry-after'] ? Number(headers['retry-after']) : null;
   await body.dump();
@@ -51,14 +64,17 @@ async function attempt(pool, name, token) {
  * @param {boolean} [opts.skipNtp]    ne pas synchroniser l'horloge
  * @param {() => Promise<string>} [opts.getToken] fournisseur de token frais
  *        (rafraîchissement sur 401 / expiration ~24h en surveillance longue)
+ * @param {{stopped: boolean}} [opts.stopToken] jeton d'arrêt coopératif créé via
+ *        createStopToken() ; si omis, un jeton local à CET appel est créé (donc
+ *        jamais partagé avec un autre snipe() concurrent par accident)
  */
 export async function snipe(opts) {
   const {
     name, token, dropAt, monitor = false, getToken = null,
     connections = 3, burst = 6, spacingMs = 30, leadMs = 40, skipNtp = false,
+    stopToken = createStopToken(),
   } = opts;
 
-  stopFlag = false;
   const pool = new Pool(HOST, { connections, pipelining: 1 });
   // `session.token` est mutable : refreshToken() le remplace après un 401 / une
   // expiration. Le token d'accès Minecraft n'est valide que ~24h.
@@ -82,7 +98,7 @@ export async function snipe(opts) {
     // on attend l'instant local L tel que L + offset = T, soit L = T - offset.
     const toLocal = (realMs) => realMs - offset;
 
-    if (monitor) return await monitorLoop(pool, name, session, { burst, spacingMs });
+    if (monitor) return await monitorLoop(pool, name, session, { burst, spacingMs }, stopToken);
 
     if (!dropAt) throw new Error('Mode planifié : --at requis (ou utilise --monitor).');
 
@@ -167,20 +183,31 @@ async function fireBurst(pool, name, session, { burst, spacingMs }) {
 // Mode surveillance : poll la dispo et déclenche une rafale dès que le nom
 // passe libre. Utile quand on ne connaît pas la seconde exacte du drop.
 const MAX_FAILED_BURSTS = 5; // rafales perdues (nom contesté) avant abandon
-async function monitorLoop(pool, name, session, { burst, spacingMs }) {
+async function monitorLoop(pool, name, session, { burst, spacingMs }, stopToken) {
   log.step(`Surveillance de ${c.yellow}${name}${c.reset} (Ctrl+C pour arrêter)`);
   await warmup(pool, session.token, 2);
   let polls = 0;
   let failedBursts = 0;
-  while (!stopFlag) {
+  while (!stopToken.stopped) {
     polls++;
-    const { body, statusCode } = await pool.request({
-      // On sonde via l'endpoint public de Mojang par un fetch séparé serait plus
-      // propre, mais rester sur le pool chaud réduit la latence de bascule.
-      path: `/minecraft/profile/name/${encodeURIComponent(name)}/available`,
-      method: 'GET',
-      headers: { authorization: `Bearer ${session.token}` },
-    });
+    // Contrairement à tous les autres appels réseau de ce fichier, cette sonde
+    // n'avait aucun try/catch : une simple erreur transitoire (ECONNRESET, DNS,
+    // hoquet proxy) tuait toute une session de surveillance de plusieurs heures,
+    // sans retry ni log. On journalise et on continue après une pause.
+    let body, statusCode;
+    try {
+      ({ body, statusCode } = await pool.request({
+        // On sonde via l'endpoint public de Mojang par un fetch séparé serait plus
+        // propre, mais rester sur le pool chaud réduit la latence de bascule.
+        path: `/minecraft/profile/name/${encodeURIComponent(name)}/available`,
+        method: 'GET',
+        headers: { authorization: `Bearer ${session.token}` },
+      }));
+    } catch (e) {
+      log.warn(`Sondage de ${name} en erreur (${e.message}) — nouvelle tentative dans 2s.`);
+      await sleep(2000);
+      continue;
+    }
     let status = null;
     if (statusCode === 200) status = (await body.json()).status;
     else await body.dump();

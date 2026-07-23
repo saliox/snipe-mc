@@ -29,10 +29,14 @@ export async function isNameFree(name, dispatcher = null) {
 // Disponibilité côté compte connecté : indique aussi NOT_ALLOWED (nom réservé,
 // juron filtré, etc.) que l'API publique ne distingue pas.
 // Renvoie 'AVAILABLE' | 'DUPLICATE' | 'NOT_ALLOWED'.
-export async function nameStatus(name, accessToken) {
+// dispatcher optionnel : proxy undici, pour ne pas exposer l'IP réelle pendant
+// un scan proxifié (même logique que isNameFree ci-dessus).
+export async function nameStatus(name, accessToken, dispatcher = null) {
+  const opts = { method: 'GET', headers: { authorization: `Bearer ${accessToken}` } };
+  if (dispatcher) opts.dispatcher = dispatcher;
   const { statusCode, body } = await request(
     `https://api.minecraftservices.com/minecraft/profile/name/${encodeURIComponent(name)}/available`,
-    { method: 'GET', headers: { authorization: `Bearer ${accessToken}` } }
+    opts
   );
   if (statusCode === 200) {
     const data = await body.json();

@@ -896,6 +896,17 @@ async function refreshAccounts() {
   const sel = $('acctSelect');
   sel.innerHTML = '<option value="">— comptes —</option>' +
     r.accounts.map((a) => `<option value="${a.id}"${a.active ? ' selected' : ''}>${esc(a.label)}${a.name ? ` (${esc(a.name)})` : ''}</option>`).join('');
+  // Coffre OS (safeStorage/DPAPI) indisponible -> repli sur un chiffrement plus
+  // faible (securebox, lié machine+utilisateur) : visible plutôt que silencieux.
+  const badge = $('acctEncBadge');
+  if (badge) {
+    const degraded = r.secureStorageAvailable === false && r.accounts.length > 0;
+    badge.classList.toggle('hidden', !degraded);
+    if (degraded) {
+      badge.innerHTML = '<span class="warn">⚠ coffre OS indisponible — comptes chiffrés en repli (protection plus faible)</span>';
+      badge.title = 'safeStorage/DPAPI indisponible sur ce système : les tokens de comptes enregistrés sont chiffrés via une clé dérivée machine+utilisateur au lieu du coffre du système d\'exploitation.';
+    }
+  }
 }
 $('acctSaveBtn').onclick = async () => {
   const r = await window.api.accountSave($('acctLabel').value.trim());
@@ -1008,7 +1019,11 @@ $('watchList').onclick = async (e) => {
 $('watchAutoclaim').onchange = () => window.api.monitorAutoclaim($('watchAutoclaim').checked);
 $('monitorToggleBtn').onclick = async () => {
   const st = await window.api.monitorStatus();
-  if (st.on) await window.api.monitorStop(); else await window.api.monitorStart();
+  if (st.on) { await window.api.monitorStop(); return; }
+  // Même liste que le bulk-check : la veille passe aussi par les proxies
+  // configurés (sinon elle fuiterait l'IP réelle pendant un scan censé être anonyme).
+  const r = await window.api.monitorStart(proxiesArray());
+  if (!r.ok && r.error) cprint('err', r.error);
 };
 function setMonitorUI(on) {
   $('monitorState').textContent = on ? '● surveillance active' : '○ arrêtée';

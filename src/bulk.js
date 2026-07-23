@@ -136,7 +136,10 @@ export async function bulkCheck(names, opts = {}) {
         let detail = '';
         if (token) {
           try {
-            const st = await nameStatus(item.name, token);
+            // Même agent que la vérification de disponibilité ci-dessus : si un
+            // proxy est configuré pour ce scan, ne jamais basculer en direct ici
+            // (sinon l'IP réelle liée au compte fuit, en plein scan anonyme).
+            const st = await nameStatus(item.name, token, agent);
             detail = st === 'AVAILABLE' ? 'réclamable' : st === 'NOT_ALLOWED' ? 'BLOQUÉ' : st;
           } catch { /* pas de détail */ }
         }

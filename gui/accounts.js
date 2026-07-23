@@ -34,10 +34,14 @@ function dec(a) {
 }
 
 // Liste allégée (sans tokens) pour l'UI.
+// secureStorageAvailable : false => les tokens de comptes enregistrés tombent
+// en repli sur le chiffrement securebox (plus faible que le coffre OS/DPAPI) ;
+// l'UI doit le montrer plutôt que de le faire silencieusement (voir enc() ci-dessus).
 export function listAccounts() {
   const d = load();
   return {
     active: d.active,
+    secureStorageAvailable: safeStorage.isEncryptionAvailable(),
     accounts: d.accounts.map((a) => ({ id: a.id, label: a.label, name: a.profile?.name, active: a.id === d.active })),
   };
 }
