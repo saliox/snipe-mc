@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none';" />
+<title>Snipe MC — Accès</title>
+<style>
+  body { margin: 0; background: radial-gradient(circle at 50% -10%, #0c1a10 0%, #05070a 60%); color: #b9f5c4; font: 15px "Cascadia Code","Consolas",monospace; display: grid; place-items: center; height: 100vh; }
+  .card { width: 360px; background: linear-gradient(180deg,#0b1117,#0a0f14); border: 1px solid #123018; border-radius: 12px; padding: 28px; box-shadow: 0 0 30px rgba(57,255,20,.08); }
+  h1 { font-size: 18px; color: #39ff14; margin: 0 0 4px; letter-spacing: 1px; text-shadow: 0 0 8px rgba(57,255,20,.4); }
+  p { color: #8fb; opacity: .85; margin: 0 0 12px; }
+  input { width: 100%; box-sizing: border-box; margin: 6px 0; padding: 10px; border-radius: 8px; border: 1px solid #163; background: #04070a; color: #39ff14; outline: none; font-family: inherit; }
+  input:focus { border-color: #1f9c3a; box-shadow: 0 0 8px rgba(57,255,20,.25); }
+  button { width: 100%; padding: 11px; margin-top: 8px; border: 0; border-radius: 8px; background: #39ff14; color: #031; font-weight: 700; cursor: pointer; font-family: inherit; }
+  button:hover { box-shadow: 0 0 12px rgba(57,255,20,.4); }
+  button.ghost { background: transparent; color: #8fb; border: 1px solid #163; }
+  .err { color: #ff5b5b; min-height: 18px; font-size: 13px; margin-top: 4px; }
+  .hide { display: none; }
+  .brand { text-align: center; color: #4f6b57; font-size: 11px; margin-bottom: 14px; letter-spacing: 3px; }
+</style></head>
+<body>
+  <div class="card">
+    <div class="brand">MINECRAFT&nbsp;SNIPER</div>
+    <div id="login">
+      <h1>Connexion</h1><p>Connecte-toi pour vérifier ton abonnement.</p>
+      <input id="email" type="email" placeholder="Email" autocomplete="username" spellcheck="false" />
+      <input id="pass" type="password" placeholder="Mot de passe" autocomplete="current-password" />
+      <div class="err" id="e1"></div>
+      <button id="btnLogin">Se connecter</button>
+      <button id="btnToSignup" class="ghost">Créer un compte</button>
+    </div>
+    <div id="signup" class="hide">
+      <h1>Créer un compte</h1><p>Un compte = snipe-mc + snipe-hub.</p>
+      <input id="semail" type="email" placeholder="Email" spellcheck="false" />
+      <input id="spass" type="password" placeholder="Mot de passe (8+)" />
+      <div class="err" id="e3"></div>
+      <button id="btnSignup">Créer</button>
+      <button id="btnToLogin" class="ghost">J'ai déjà un compte</button>
+    </div>
+    <div id="pay" class="hide">
+      <h1>Abonne-toi — 3 €/mois</h1>
+      <p>Aucun abonnement actif. Débloque les snipers pour 3 €/mois, résiliable à tout moment.</p>
+      <div class="err" id="e2"></div>
+      <button id="btnPay">S'abonner (3 €/mois)</button>
+      <button id="btnRecheck" class="ghost">J'ai payé — revérifier</button>
+      <button id="btnLogout" class="ghost">Changer de compte</button>
+    </div>
+  </div>
+  <script src="gate.js"></script>
+</body></html>

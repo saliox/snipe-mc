@@ -6,3 +6,6 @@ release/
 # Clé privée de signature des MAJ (Ed25519) — JAMAIS committée/poussée.
 .sign-key.b64
 .sign-pub.b64
+# Clé privée d'entitlement (abonnement) — va dans le secret Supabase Edge, jamais ici.
+.ent-key.b64
+.ent-pub.b64

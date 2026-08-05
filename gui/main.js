@@ -40,6 +40,7 @@ import { listAccounts, saveCurrentAsAccount, activateAccount, removeAccount, all
 import * as history from './history.js';
 import { getWebhookPublic, setWebhook, sendWebhook, BLURPLE } from './webhook.js';
 import { getPrefs, setPrefs } from './prefs.js';
+import * as subgate from './subgate.js';
 import { initUpdater, checkForUpdates, applyUpdate } from './updater.js';
 
 let win;
@@ -75,7 +76,9 @@ function createWindow() {
       devTools: !app.isPackaged, // DevTools désactivés en version packagée
     },
   });
-  win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  // Gate d'abonnement OFF par défaut : resolveEntry() renvoie index.html tant que
+  // SUB_GATE != 1 (comportement identique). Sinon → gate.html (ou index.html si grâce).
+  win.loadFile(subgate.resolveEntry());
 
   // Ouvre en grande fenêtre maximisée (l'app paraissait minuscule au démarrage).
   win.once('ready-to-show', () => { win.maximize(); win.show(); });
@@ -232,6 +235,22 @@ ipcMain.handle('app-version', () => app.getVersion());
 ipcMain.handle('update-check', () => checkForUpdates({ silent: false }));
 ipcMain.handle('update-apply', () => applyUpdate());
 
+// --- Subgate (abonnement) : inertes si SUB_GATE != 1 ---
+ipcMain.handle('subgate:state', () => subgate.ipcState());
+ipcMain.handle('subgate:login', (_e, { email, password }) => subgate.ipcLogin(email, password));
+ipcMain.handle('subgate:signup', (_e, { email, password }) => subgate.ipcSignup(email, password));
+ipcMain.handle('subgate:refresh', () => subgate.ipcRefresh());
+ipcMain.handle('subgate:openCheckout', () => subgate.ipcOpenCheckout());
+ipcMain.handle('subgate:logout', () => subgate.ipcLogout());
+ipcMain.handle('subgate:enter', () => {
+  if (subgate.isEnabled() && !subgate.isVerified()) return { ok: false };
+  win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  return { ok: true };
+});
+// Garde des IPC moteur : quand le gate est actif et l'accès non vérifié, on refuse
+// (coupe le contournement « charger index.html à la main »). No-op si flag OFF.
+function gateLocked() { return subgate.isEnabled() && !subgate.isVerified(); }
+
 // --- Compte / token ---
 // Profil actif = token manuel si présent, sinon login Microsoft en cache.
 ipcMain.handle('whoami', async () => {
@@ -270,6 +289,7 @@ ipcMain.handle('login', async () => {
 
 // --- Change username ---
 ipcMain.handle('change-username', async (_e, name) => {
+  if (gateLocked()) return { ok: false, error: 'LOCKED' };
   try {
     if (!validName(name)) return { ok: false, error: 'Pseudo invalide (3-16 car., [A-Za-z0-9_]).' };
     const active = await tryGetActiveToken();
@@ -326,6 +346,7 @@ ipcMain.handle('measure-latency', async () => {
 });
 
 ipcMain.handle('check', async (_e, name) => {
+  if (gateLocked()) return { ok: false, error: 'LOCKED' };
   try {
     const out = { ok: true, name, valid: validName(name) };
     out.seen = history.lookup(name); // « déjà vu » = état PRÉCÉDENT (avant ce check)
@@ -383,7 +404,7 @@ ipcMain.handle('watch-get', () => { try { return { ok: true, names: watchlist.ge
 ipcMain.handle('watch-add', (_e, names) => { try { const arr = Array.isArray(names) ? names : [names]; return { ok: true, names: watchlist.addWatch(arr) }; } catch (e) { return { ok: false, error: e.message }; } });
 ipcMain.handle('watch-remove', (_e, name) => { try { return { ok: true, names: watchlist.removeWatch(name) }; } catch (e) { return { ok: false, error: e.message }; } });
 ipcMain.handle('watch-clear', () => { try { return { ok: true, names: watchlist.clearWatch() }; } catch (e) { return { ok: false, error: e.message }; } });
-ipcMain.handle('monitor-start', () => { startMonitor(); return { ok: true, on: monitor.on }; });
+ipcMain.handle('monitor-start', () => { if (gateLocked()) return { ok: false, error: 'LOCKED' }; startMonitor(); return { ok: true, on: monitor.on }; });
 ipcMain.handle('monitor-stop', () => { stopMonitor(); return { ok: true, on: monitor.on }; });
 ipcMain.handle('monitor-status', () => ({ ok: true, on: monitor.on, autoclaim: monitor.autoclaim }));
 ipcMain.handle('monitor-autoclaim', (_e, v) => { monitor.autoclaim = !!v; return { ok: true, autoclaim: monitor.autoclaim }; });
@@ -475,6 +496,7 @@ ipcMain.handle('save-txt', async (_e, { suggested, content }) => {
 
 // --- Check en masse ---
 ipcMain.handle('bulk-check', async (_e, { names, delayMs, useToken, proxies }) => {
+  if (gateLocked()) return { ok: false, error: 'LOCKED' };
   // Anti-concurrence : deux scans simultanés partageraient bulkStop + émettraient
   // des résultats entrelacés (progression/historique corrompus).
   if (bulkBusy) return { ok: false, error: 'Un scan est déjà en cours.' };
@@ -539,6 +561,7 @@ ipcMain.handle('test-proxies', async (_e, lines) => {
 
 // --- Snipe ---
 ipcMain.handle('snipe', async (_e, opts) => {
+  if (gateLocked()) return { ok: false, error: 'LOCKED' };
   try {
     if (!validName(opts.name)) return { ok: false, error: 'Pseudo invalide (3-16 car., [A-Za-z0-9_]).' };
     const common = {

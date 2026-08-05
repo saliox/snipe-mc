@@ -74,3 +74,14 @@ contextBridge.exposeInMainWorld('api', {
   onWatchFree: (cb) => ipcRenderer.on('watch-free', (_e, data) => cb(data)),
   onMonitorStatus: (cb) => ipcRenderer.on('monitor-status', (_e, data) => cb(data)),
 });
+
+// Pont du gate d'abonnement (consommé par gate.html ; ignoré par index.html).
+contextBridge.exposeInMainWorld('subgate', {
+  state: () => ipcRenderer.invoke('subgate:state'),
+  login: (email, password) => ipcRenderer.invoke('subgate:login', { email, password }),
+  signup: (email, password) => ipcRenderer.invoke('subgate:signup', { email, password }),
+  refresh: () => ipcRenderer.invoke('subgate:refresh'),
+  openCheckout: () => ipcRenderer.invoke('subgate:openCheckout'),
+  logout: () => ipcRenderer.invoke('subgate:logout'),
+  enter: () => ipcRenderer.invoke('subgate:enter'),
+});
