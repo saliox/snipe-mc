@@ -356,21 +356,30 @@ $('gemsOnly').onchange = refreshFreeView;
 $('gemTier').onchange = refreshFreeView;
 
 // Alerte Discord quand une pépite (tier ≥ seuil) se libère pendant un scan.
-// Dédup par nom + throttle 2,5 s (anti rate-limit Discord). Envoi = no-op si le
-// webhook n'est pas configuré/activé (géré côté main).
+// Dédup par nom + FILE espacée 2,6 s (anti rate-limit Discord) : les pépites qui
+// arrivent en rafale sont mises en file, jamais perdues. No-op si webhook off (main).
 const gemAlerted = new Set();
-let lastGemAlert = 0;
+const gemQueue = [];
+let gemDraining = false;
+async function drainGemQueue() {
+  if (gemDraining) return;
+  gemDraining = true;
+  while (gemQueue.length) {
+    const g = gemQueue.shift();
+    window.api.webhookGem(g.name, g.tier);
+    await new Promise((r) => setTimeout(r, 2600)); // espace > rate-limit Discord
+  }
+  gemDraining = false;
+}
 async function maybeGemAlert(name) {
   const key = name.toLowerCase();
   if (gemAlerted.has(key)) return;
   const rk = await window.api.rankNames([name]);
   const t = rk && rk.ok && rk.ranked[0];
   if (!t || TIERS.indexOf(t.tier) > gemThreshold()) return;
-  const now = Date.now();
-  if (now - lastGemAlert < 2500) return;
-  lastGemAlert = now;
   gemAlerted.add(key);
-  window.api.webhookGem(name, t.tier);
+  gemQueue.push({ name, tier: t.tier });
+  drainGemQueue();
 }
 async function claimName(name) {
   if (!name) return;

@@ -132,9 +132,12 @@ export async function bulkCheck(names, opts = {}) {
       onSuccess();
       if (res.free === true) {
         free++; freeList.push(item.name); checked++;
-        // Le tag [LIBRE] porte déjà l'info : on ne détaille que le statut compte.
+        // Statut compte (réclamable/bloqué) via un appel AUTHENTIFIÉ. On ne le fait
+        // JAMAIS pendant un scan proxifié : nameStatus() part en direct (le token ne
+        // doit pas transiter par un proxy public), ce qui RÉVÉLERAIT l'IP réelle + le
+        // Bearer à Mojang. Sans proxy, la connexion est de toute façon directe → OK.
         let detail = '';
-        if (token) {
+        if (token && !proxyPool) {
           try {
             const st = await nameStatus(item.name, token);
             detail = st === 'AVAILABLE' ? 'réclamable' : st === 'NOT_ALLOWED' ? 'BLOQUÉ' : st;

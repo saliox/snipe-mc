@@ -33,11 +33,21 @@ export function ntpQuery(server = 'time.google.com', port = 123, timeout = 3000)
     socket.on('error', (e) => finish(e));
     socket.on('message', (msg) => {
       const T4 = Date.now();
+      // Validation du paquet : rejeter les réponses dégénérées (KoD, non synchro,
+      // transmit-ts nul) qui donneraient un offset aberrant → snipe raté.
+      if (msg.length < 48) return finish(new Error('Réponse NTP trop courte'));
+      const li = (msg[0] >> 6) & 0x3;   // Leap Indicator (3 = non synchronisé)
+      const mode = msg[0] & 0x7;         // 4 = serveur
+      const stratum = msg[1];            // 0 = kiss-o'-death / non spécifié
+      if (li === 3) return finish(new Error('NTP non synchronisé (LI=3)'));
+      if (mode !== 4 || stratum === 0 || stratum > 15) return finish(new Error('Réponse NTP invalide (mode/stratum)'));
       const T1 = t1;
       const T2 = readTimestamp(msg, 32); // receive timestamp du serveur
       const T3 = readTimestamp(msg, 40); // transmit timestamp du serveur
+      if (!(T3 > 0)) return finish(new Error('Transmit timestamp NTP nul')); // seconds=0 → T3 très négatif
       const offset = ((T2 - T1) + (T3 - T4)) / 2;
       const rtt = (T4 - T1) - (T3 - T2);
+      if (Math.abs(offset) > 24 * 3600 * 1000) return finish(new Error('Offset NTP aberrant'));
       finish(null, { offset, rtt, server });
     });
 

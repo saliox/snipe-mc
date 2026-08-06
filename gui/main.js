@@ -607,7 +607,10 @@ ipcMain.handle('snipe', async (_e, opts) => {
       bus?.emit?.('log', { level: 'step', msg: `Snipe multi-cibles : ${targets.length} pseudos (le 1er libre gagne)`, t: Date.now() });
       const runs = targets.map((nm) =>
         snipe({ ...common, name: nm, token: active.accessToken, getToken })
-          .then((r) => ({ name: nm, success: !!r.success }))
+          // 1er gagnant → requestStop() coupe le stopFlag GLOBAL : en mode surveillance,
+          // les runs frères sortent de leur boucle (sinon Promise.all ne résout jamais
+          // et leurs Pools undici restent ouverts à poller indéfiniment).
+          .then((r) => { if (r.success) requestStop(); return { name: nm, success: !!r.success }; })
           .catch((e) => ({ name: nm, success: false, error: e.message })));
       const results = await Promise.all(runs);
       const winner = results.find((x) => x.success) || null;
