@@ -121,7 +121,8 @@ function updateTray() {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Ouvrir Snipe MC', click: showWindow },
     { label: monitor.on ? '● Surveillance active' : '○ Surveillance arrêtée', enabled: false },
-    { label: monitor.on ? 'Arrêter la surveillance' : 'Démarrer la surveillance', click: () => (monitor.on ? stopMonitor() : startMonitor()) },
+    // Gardé : le clic tray ne doit pas contourner l'abonnement (M1).
+    { label: monitor.on ? 'Arrêter la surveillance' : 'Démarrer la surveillance', enabled: monitor.on || !gateLocked(), click: () => { if (!monitor.on && gateLocked()) return; monitor.on ? stopMonitor() : startMonitor(); } },
     { type: 'separator' },
     { label: 'Quitter', click: () => { app.isQuitting = true; app.quit(); } },
   ]));
@@ -131,6 +132,7 @@ function notifyFree(name) {
 }
 function startMonitor() {
   if (monitor.on) return;
+  if (gateLocked()) return; // abonnement requis (M1)
   monitor.on = true;
   monitor.notified.clear();
   // .catch aux points d'appel : monitorTick est async et lancé par setInterval,
@@ -148,6 +150,7 @@ function stopMonitor() {
 }
 async function monitorTick() {
   if (monitor.ticking) return;
+  if (gateLocked()) { monitor.on = false; return; } // abonnement requis (M1)
   monitor.ticking = true;
   try {
     for (const name of watchlist.getWatch()) {
@@ -237,6 +240,7 @@ ipcMain.handle('update-apply', () => applyUpdate());
 
 // --- Subgate (abonnement) : inertes si SUB_GATE != 1 ---
 ipcMain.handle('subgate:state', () => subgate.ipcState());
+ipcMain.handle('subgate:access', () => subgate.ipcAccess());
 ipcMain.handle('subgate:login', (_e, { email, password }) => subgate.ipcLogin(email, password));
 ipcMain.handle('subgate:signup', (_e, { email, password }) => subgate.ipcSignup(email, password));
 ipcMain.handle('subgate:refresh', () => subgate.ipcRefresh());
@@ -302,6 +306,7 @@ ipcMain.handle('change-username', async (_e, name) => {
 
 // Cooldown de renommage (30 j) du compte actif.
 ipcMain.handle('namechange-info', async () => {
+  if (gateLocked()) return { ok: false, error: 'LOCKED' };
   try {
     const active = await tryGetActiveToken();
     if (!active) return { ok: false, error: 'Aucun token actif.' };
@@ -366,30 +371,34 @@ ipcMain.handle('check', async (_e, name) => {
 ipcMain.handle('history-stats', () => { try { return { ok: true, ...history.stats() }; } catch (e) { return { ok: false, error: e.message }; } });
 ipcMain.handle('history-lookup', (_e, name) => { try { return { ok: true, entry: history.lookup(name) }; } catch (e) { return { ok: false, error: e.message }; } });
 ipcMain.handle('history-search', (_e, q) => { try { return { ok: true, names: history.searchFree(q) }; } catch (e) { return { ok: false, error: e.message }; } });
-ipcMain.handle('history-free-all', () => { try { return { ok: true, names: history.allFree() }; } catch (e) { return { ok: false, error: e.message }; } });
+ipcMain.handle('history-free-all', () => { if (gateLocked()) return { ok: false, error: 'LOCKED' }; try { return { ok: true, names: history.allFree() }; } catch (e) { return { ok: false, error: e.message }; } });
 ipcMain.handle('history-clear', () => { try { history.clear(); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; } });
 
 // --- Checkpoint de session (reprise) : fichier userData, persistant et fiable
 //     (contrairement au localStorage file:// d'Electron). ---
 const CHECKPOINT_FILE = () => path.join(app.getPath('userData'), 'checkpoint.json');
-ipcMain.handle('checkpoint-save', async (_e, data) => {
+// Suffixe tmp unique : Date.now() seul peut collisionner entre deux sauvegardes dans
+// la même ms (A4) ; on ajoute une séquence monotone et on nettoie le tmp en cas d'échec.
+let ckptSeq = 0;
+async function writeCheckpointAtomic(content) {
+  const tmp = `${CHECKPOINT_FILE()}.${Date.now()}.${++ckptSeq}.tmp`;
   try {
-    // Écriture ASYNC (ne bloque pas le main sur de gros scans) + temp unique
-    // (pas de collision entre deux sauvegardes) + rename atomique.
-    const tmp = `${CHECKPOINT_FILE()}.${Date.now()}.tmp`;
-    await fs.promises.writeFile(tmp, JSON.stringify(data));
+    await fs.promises.writeFile(tmp, content);
     await fs.promises.rename(tmp, CHECKPOINT_FILE());
-    return { ok: true };
-  } catch (e) { return { ok: false, error: e.message }; }
+  } catch (e) {
+    await fs.promises.rm(tmp, { force: true }).catch(() => {});
+    throw e;
+  }
+}
+ipcMain.handle('checkpoint-save', async (_e, data) => {
+  try { await writeCheckpointAtomic(JSON.stringify(data)); return { ok: true }; }
+  catch (e) { return { ok: false, error: e.message }; }
 });
-// Variante « brute » : le renderer a déjà sérialisé (JSON string). On écrit tel
-// quel → pas de 2e JSON.stringify ici ni de clone d'un gros graphe d'objets en IPC.
+// Variante « brute » : le renderer a déjà sérialisé (JSON string).
 ipcMain.handle('checkpoint-save-raw', async (_e, str) => {
   try {
     if (typeof str !== 'string') return { ok: false, error: 'payload non-string' };
-    const tmp = `${CHECKPOINT_FILE()}.${Date.now()}.tmp`;
-    await fs.promises.writeFile(tmp, str);
-    await fs.promises.rename(tmp, CHECKPOINT_FILE());
+    await writeCheckpointAtomic(str);
     return { ok: true };
   } catch (e) { return { ok: false, error: e.message }; }
 });

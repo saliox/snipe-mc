@@ -48,8 +48,12 @@ export function saveEncrypted(filePath, obj) {
   const data = Buffer.concat([cipher.update(JSON.stringify(obj), 'utf8'), cipher.final()]);
   const tag = cipher.getAuthTag();
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, Buffer.concat([iv, tag, data]));
-  try { fs.chmodSync(filePath, 0o600); } catch { /* no-op Windows */ }
+  // Écriture ATOMIQUE (tmp + rename) : un crash en pleine écriture ne laisse pas un
+  // fichier de secret tronqué (perte de session/token).
+  const tmp = `${filePath}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, Buffer.concat([iv, tag, data]));
+  try { fs.chmodSync(tmp, 0o600); } catch { /* no-op Windows */ }
+  fs.renameSync(tmp, filePath);
 }
 
 export function loadEncrypted(filePath) {

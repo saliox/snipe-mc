@@ -44,17 +44,38 @@ Deno.serve(async (req) => {
   if (error || !user) return json({ error: 'invalid_token' }, 401)
 
   let device = ''
-  try { device = String((await req.json())?.device ?? '') } catch { /* body vide */ }
+  try { device = String((await req.json())?.device ?? '').slice(0, 128) } catch { /* body vide */ }
 
-  const { data: sub } = await admin
+  // M4 : une erreur DB ne doit JAMAIS produire un jeton active:false en 200 (ça
+  // écraserait la grâce hors-ligne d'un abonné). On renvoie 503 → le client garde son cache.
+  const { data: sub, error: dbErr } = await admin
     .from('subscriptions')
     .select('status, current_period_end')
     .eq('user_id', user.id)
     .maybeSingle()
+  if (dbErr) return json({ error: 'db' }, 503)
+
+  // M2 : quota d'appareils SERVEUR-AUTORITAIRE (le device signé est enregistré et plafonné).
+  const MAX_DEVICES = 3
+  let deviceAllowed = true
+  if (device) {
+    const { data: known, error: e1 } = await admin.from('devices')
+      .select('device_fp').eq('user_id', user.id).eq('device_fp', device).maybeSingle()
+    if (e1) return json({ error: 'db' }, 503)
+    if (known) {
+      await admin.from('devices').update({ last_seen: new Date().toISOString() })
+        .eq('user_id', user.id).eq('device_fp', device)
+    } else {
+      const { count } = await admin.from('devices')
+        .select('*', { count: 'exact', head: true }).eq('user_id', user.id)
+      if ((count ?? 0) >= MAX_DEVICES) deviceAllowed = false // trop d'appareils → pas d'accès sur celui-ci
+      else await admin.from('devices').insert({ user_id: user.id, device_fp: device })
+    }
+  }
 
   const now = Math.floor(Date.now() / 1000)
   const pe = sub?.current_period_end ? Math.floor(Date.parse(sub.current_period_end) / 1000) : 0
-  const active = !!sub &&
+  const active = deviceAllowed && !!sub &&
     (['active', 'trialing'].includes(sub.status) || (sub.status === 'past_due' && now < pe))
 
   const payload = {

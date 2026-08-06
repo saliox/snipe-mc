@@ -64,8 +64,15 @@ applyExeIcon(exePath, path.join(root, 'build', 'icon.ico'));
 // 2. App (+ dossier build/ pour l'icône lue au runtime)
 const appDir = path.join(out, 'resources', 'app');
 fs.mkdirSync(path.join(appDir, 'node_modules'), { recursive: true });
+// SÉCURITÉ (gate d'abonnement) : ne PAS livrer le CLI src/index.js dans l'app packagée.
+// C'est un moteur de snipe complet SANS le gate → sinon « extract asar → node src/index.js »
+// contourne l'abonnement. Le gate ne vit que dans la couche GUI (gui/main.js).
+const EXCLUDE = new Set([path.resolve(root, 'src', 'index.js')]);
 for (const item of ['gui', 'src', 'package.json', 'build']) {
-  fs.cpSync(path.join(root, item), path.join(appDir, item), { recursive: true });
+  fs.cpSync(path.join(root, item), path.join(appDir, item), {
+    recursive: true,
+    filter: (s) => !EXCLUDE.has(path.resolve(s)),
+  });
 }
 for (const dep of RUNTIME_DEPS) {
   fs.cpSync(path.join(root, 'node_modules', dep), path.join(appDir, 'node_modules', dep), { recursive: true });

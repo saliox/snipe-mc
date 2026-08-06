@@ -29,7 +29,7 @@ node -e "const{generateKeyPairSync}=require('crypto');const{publicKey,privateKey
 
 ## 2. Supabase
 1. Projet Supabase créé → note `SUPABASE_URL`, `SUPABASE_ANON_KEY` (public), `SUPABASE_SERVICE_ROLE_KEY` (secret, Edge seulement).
-2. Appliquer la migration `supabase/migrations/0001_subscriptions.sql` (table + RLS).
+2. Appliquer les migrations `supabase/migrations/0001_subscriptions.sql` (table + RLS) et `0002_devices.sql` (quota d'appareils).
 3. Déployer les fonctions :
    ```bash
    supabase functions deploy subscription-status
@@ -49,15 +49,24 @@ node -e "const{generateKeyPairSync}=require('crypto');const{publicKey,privateKey
 
 **Live** : activer le compte → recréer Product/Price + Payment Link + endpoint webhook (test ≠ live), nouveaux `sk_live_`/`whsec_live_`, mettre à jour les secrets + `STRIPE_PAYMENT_LINK`.
 
-## 4. Activer le gate dans le build
-Dans le `.env` posé à côté de `Snipe MC.exe` (ou du hub) :
+## 4. Activer le gate dans le build (config BAKÉE, pas un .env)
+⚠️ En build **packagé**, le `.env` est **ignoré** pour le gate (durcissement C2 : sinon
+l'utilisateur le désactiverait en éditant une ligne). L'activation se fait en remplissant
+`gui/gate-config.js` **AVANT** de construire l'installeur :
+```js
+export const GATE = {
+  SUB_GATE: '1',
+  SUPABASE_URL: 'https://xxxx.supabase.co',
+  SUPABASE_ANON_KEY: 'eyJ...',        // anon key PUBLIQUE (jamais la service_role)
+  STRIPE_PAYMENT_LINK: 'https://buy.stripe.com/xxxxxxxx',
+  SUB_PRICE_LABEL: '3 €/mois',
+};
 ```
-SUB_GATE=1
-SUPABASE_URL=https://xxxx.supabase.co
-SUPABASE_ANON_KEY=eyJ...
-STRIPE_PAYMENT_LINK=https://buy.stripe.com/xxxxxxxx
-```
-Absent → aucun gate. On peut gater snipe-mc et pas le hub (ou l'inverse) : c'est par `.env`.
+Puis `node scripts/publish-update.mjs "notes"`. Laisser vide = gate OFF (défaut).
+En **dev** (`npm start`, non packagé), le `.env` peut surcharger pour tester.
+On peut gater snipe-mc et pas le hub : chaque app a son propre `gate-config.js`.
+
+Quota d'appareils par compte : 3 (constante `MAX_DEVICES` dans `subscription-status`).
 
 ## 5. Réutiliser pour snipe-hub
 1. Copier `gui/subgate.js` + `gui/renderer/gate.html` + `gui/renderer/gate.js` (même `ENT_PUBLIC_KEY_SPKI_B64`).

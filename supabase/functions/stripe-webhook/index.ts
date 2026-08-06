@@ -49,7 +49,8 @@ Deno.serve(async (req) => {
   try {
     ev = await stripe.webhooks.constructEventAsync(body, sig, whsec, undefined, cryptoProvider)
   } catch (e) {
-    return new Response(`bad sig: ${(e as Error).message}`, { status: 400 })
+    console.error('signature', (e as Error).message) // B2 : ne pas divulguer le détail au client
+    return new Response('invalid signature', { status: 400 })
   }
 
   try {
@@ -77,7 +78,11 @@ Deno.serve(async (req) => {
       case 'customer.subscription.created':
       case 'customer.subscription.updated':
       case 'customer.subscription.deleted': {
-        const sub = ev.data.object as Stripe.Subscription
+        const obj = ev.data.object as Stripe.Subscription
+        // M3 : Stripe ne garantit pas l'ordre et rejoue sur 5xx. On re-récupère l'état
+        // COURANT au lieu d'upserter le payload de l'event : un vieux 'updated:active'
+        // redélivré APRÈS une résiliation ne réactive donc pas l'abonnement.
+        const sub = await stripe.subscriptions.retrieve(obj.id)
         const uid = (sub.metadata?.supabase_user_id) ?? await uidFromCustomer(sub.customer as string)
         if (uid) await upsertSub(uid, sub)
         break

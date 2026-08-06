@@ -78,6 +78,7 @@ contextBridge.exposeInMainWorld('api', {
 // Pont du gate d'abonnement (consommé par gate.html ; ignoré par index.html).
 contextBridge.exposeInMainWorld('subgate', {
   state: () => ipcRenderer.invoke('subgate:state'),
+  access: () => ipcRenderer.invoke('subgate:access'),
   login: (email, password) => ipcRenderer.invoke('subgate:login', { email, password }),
   signup: (email, password) => ipcRenderer.invoke('subgate:signup', { email, password }),
   refresh: () => ipcRenderer.invoke('subgate:refresh'),

@@ -149,6 +149,10 @@ function applyAppZip(zipPath, version) {
     '$done = $false\r\n' +
     `for ($i = 0; $i -lt 6 -and -not $done; $i++) { try { Expand-Archive -Path '${q(zipPath)}' -DestinationPath '${q(resourcesDir)}' -Force -ErrorAction Stop; $done = $true } catch { Start-Sleep -Milliseconds 700 } }\r\n` +
     'if (-not $done) { exit 2 }\r\n' +
+    // Purge l'orphelin src/index.js (CLI) laissé par un ancien install : Expand-Archive
+    // -Force écrase mais ne SUPPRIME pas les fichiers absents du zip. Sans ça, le CLI
+    // non-gaté resterait sur les installs existantes après MAJ.
+    `Remove-Item -LiteralPath '${q(path.join(resourcesDir, 'app', 'src', 'index.js'))}' -Force -ErrorAction SilentlyContinue\r\n` +
     // Aligne la version affichée dans « Applications installées ».
     `Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\SnipeMC' -Name DisplayVersion -Value '${q(version || '')}'\r\n` +
     `Start-Process -FilePath '${q(exe)}'\r\n`;
