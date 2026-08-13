@@ -941,7 +941,7 @@ $('cooldownBtn').onclick = async () => {
 function applyDrop(baseMs, note) {
   const drop = new Date(baseMs + 37 * 86400000);
   const p = (n) => String(n).padStart(2, '0');
-  $('snipeAt').value = `${drop.getFullYear()}-${p(drop.getMonth() + 1)}-${p(drop.getDate())}T${p(drop.getHours())}:${p(drop.getMinutes())}:00`;
+  $('snipeAt').value = `${drop.getFullYear()}-${p(drop.getMonth() + 1)}-${p(drop.getDate())}T${p(drop.getHours())}:${p(drop.getMinutes())}:${p(drop.getSeconds())}`;
   document.querySelector('input[name="smode"][value="at"]').checked = true;
   $('snipeAt').disabled = false; $('snipeIn').disabled = true;
   const soon = drop.getTime() - Date.now();
