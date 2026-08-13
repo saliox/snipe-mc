@@ -42,13 +42,20 @@ export const c = COLORS;
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Attente haute précision : setTimeout grossier puis busy-wait sur les derniers ms.
+// Attente haute précision : setTimeout grossier puis poll fin non-bloquant sur les derniers ms.
 export async function sleepUntil(targetEpochMs, busyWindowMs = 15) {
   const coarseTarget = targetEpochMs - busyWindowMs;
   let remaining = coarseTarget - Date.now();
   if (remaining > 0) await sleep(remaining);
-  // Busy-wait final pour la précision sub-milliseconde.
-  while (Date.now() < targetEpochMs) { /* spin */ }
+  // Poll final via setImmediate plutôt qu'un while synchrone : un busy-wait
+  // bloquant monopoliserait toute la boucle d'événements et ferait dériver
+  // les autres sleepUntil() concurrents (multi-comptes / multi-cibles tirés
+  // en Promise.all) de (N-1) × busyWindowMs. setImmediate cède la main à
+  // chaque itération, donc plusieurs appels concurrents s'entrelacent
+  // équitablement tout en gardant une précision de l'ordre de la ms.
+  while (Date.now() < targetEpochMs) {
+    await new Promise((r) => setImmediate(r));
+  }
 }
 
 export function fmtDuration(ms) {
