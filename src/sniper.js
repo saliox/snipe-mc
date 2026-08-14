@@ -3,6 +3,7 @@
 import { Pool } from 'undici';
 import { log, c, sleep, sleepUntil, fmtDuration } from './util.js';
 import { bestOffset } from './ntp.js';
+import { requireEntitlement } from './entitlement.js';
 
 const HOST = 'https://api.minecraftservices.com';
 
@@ -51,8 +52,13 @@ async function attempt(pool, name, token) {
  * @param {boolean} [opts.skipNtp]    ne pas synchroniser l'horloge
  * @param {() => Promise<string>} [opts.getToken] fournisseur de token frais
  *        (rafraîchissement sur 401 / expiration ~24h en surveillance longue)
+ * @param {object} [opts.entitlement] jeton d'entitlement signé { payload, sig }
+ *        (cf src/entitlement.js). AUDIT : point d'entrée moteur — un script qui
+ *        importe sniper.js directement (hors gui/main.js) est refusé ici s'il
+ *        existe un gate actif pour ce build.
  */
 export async function snipe(opts) {
+  requireEntitlement(opts.entitlement);
   const {
     name, token, dropAt, monitor = false, getToken = null,
     connections = 3, burst = 6, spacingMs = 30, leadMs = 40, skipNtp = false,
