@@ -4,7 +4,7 @@
 // (resolveEntry → index.html, gardes gateLocked() no-op).
 //
 // Durcissements post-audit :
-//  - Config BAKÉE au build (gate-config.js) en packagé → pas désactivable via .env (C2).
+//  - Config BAKÉE au build (src/gate-config.js) en packagé → pas désactivable via .env (C2).
 //  - Décision d'accès SERVEUR-AUTORITAIRE si le backend est joignable ; sinon grâce
 //    hors-ligne BORNÉE, jugée sur une HEURE DE CONFIANCE (NTP) comparée aux champs
 //    SIGNÉS (iat/grace_until) + plafond OFFLINE_MAX — plus de bypass "gel d'horloge"
@@ -12,27 +12,39 @@
 //  - resolveEntry ne fait AUCUN fast-path cache→index (le check a lieu dans gate.html).
 //  - Jeton lié à l'uid de session (B1) ; erreurs réseau gérées (M5) ; refresh dédupliqué
 //    (B6) ; deviceId paresseux (B3) ; URL validée https (B4).
+//  - Vérification Ed25519 extraite dans src/entitlement.js (PARTAGÉE avec le moteur :
+//    src/sniper.js / src/auth.js / src/nameapi.js se gatent maintenant eux-mêmes via
+//    ce module, plus seulement via les IPC ci-dessous — cf audit "moteur nu").
+//  - Ré-vérification PÉRIODIQUE (ensureFreshAccess + poll en tâche de fond dans
+//    gui/main.js) : `verified` n'est plus un booléen vérifié une fois et gardé pour
+//    toute la session — une résiliation Stripe est détectée en quelques minutes, pas
+//    seulement au prochain redémarrage (cf audit TOCTOU).
 //
 // Réalisme : binaire public → un reverser contourne. Ça protège l'utilisateur lambda
 // (extract asar / éditer un .env ne suffit plus), pas un cracker.
 import { app, shell } from 'electron';
 import { request } from 'undici';
 import path from 'node:path';
-import os from 'node:os';
 import fs from 'node:fs';
-import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { saveEncrypted, loadEncrypted } from '../src/securebox.js';
 import { bestOffset } from '../src/ntp.js';
-import { GATE } from './gate-config.js';
+import { GATE } from '../src/gate-config.js';
+import { verifyEntitlementToken, deviceId } from '../src/entitlement.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Clé PUBLIQUE Ed25519 d'entitlement (SPKI DER base64) — figée. Pendant public de
-// ENT_PRIVATE_KEY_PKCS8_B64 (secret de l'edge function).
-const ENT_PUBLIC_KEY_SPKI_B64 = 'MCowBQYDK2VwAyEAO1Ug2gm39aRC+pPrXQqK3bDx5Loo6xCBLMmjpPiOE/8=';
-
 const OFFLINE_MAX = 7 * 24 * 3600; // plafond DUR de fonctionnement hors-ligne (s)
+
+// Fraîcheur de la vérification EN LIGNE (TOCTOU) : `verified` est mis en cache pour
+// éviter un aller-retour réseau à chaque action gatée, mais ce cache doit expirer —
+// sinon un abonnement résilié juste après vérification reste valide pour toute la
+// durée de vie du process (l'app peut tourner indéfiniment en tray). 20 min (dans la
+// fourchette 15-30 min visée) : assez court pour une détection rapide, assez long
+// pour ne pas spammer le backend à chaque clic. Indépendant de grace_until (72h) :
+// grace_until borne la grâce HORS-LIGNE, pas la fréquence de recheck EN LIGNE — le
+// réutiliser tel quel laisserait un abonnement résilié actif jusqu'à 72h.
+const VERIFY_FRESHNESS_MS = 20 * 60 * 1000;
 
 const RENDERER = (f) => path.join(__dirname, 'renderer', f);
 const INDEX = () => RENDERER('index.html');
@@ -41,6 +53,10 @@ const SESSION_FILE = () => path.join(app.getPath('userData'), 'subgate.session')
 const CACHE_FILE = () => path.join(app.getPath('userData'), 'subgate.cache');
 
 let verified = false; // source de vérité du guard IPC (état main)
+let lastVerifiedAt = 0; // Date.now() du dernier verified=true (fraîcheur, cf TOCTOU)
+let lastGraceUntil = 0; // grace_until (s, signé) du dernier jeton honoré
+let lastToken = null; // dernier jeton signé { payload, sig } honoré — exposé au moteur
+                       // (src/sniper.js, src/nameapi.js, src/auth.js) via getEntitlementToken()
 
 // Config : en packagé, SEULE gate-config.js compte (non éditable via .env). En dev,
 // le .env peut surcharger (pratique pour tester).
@@ -64,33 +80,9 @@ function backendOk() {
   catch { return false; }
 }
 
-// deviceId paresseux + mémoïsé (B3 : pas d'os.userInfo() au top-level, zéro effet si OFF).
-let _deviceId = null;
-function deviceId() {
-  if (!_deviceId) {
-    try { _deviceId = crypto.createHash('sha256').update(os.hostname() + '|' + os.userInfo().username).digest('hex'); }
-    catch { _deviceId = 'unknown'; }
-  }
-  return _deviceId;
-}
-
-let ENT_PUB = null;
-function entPub() {
-  if (!ENT_PUB) ENT_PUB = crypto.createPublicKey({ key: Buffer.from(ENT_PUBLIC_KEY_SPKI_B64, 'base64'), format: 'der', type: 'spki' });
-  return ENT_PUB;
-}
-// Ordre de clés IDENTIQUE au serveur (edge function). Octet pour octet.
-const canonical = (p) =>
-  JSON.stringify({ uid: p.uid, device: p.device, active: p.active, status: p.status, grace_until: p.grace_until, iat: p.iat });
-
-function verifyToken(tok) {
-  try {
-    if (!tok || !tok.payload || !tok.sig) return null;
-    if (!crypto.verify(null, Buffer.from(canonical(tok.payload)), entPub(), Buffer.from(tok.sig, 'base64'))) return null; // forge → rejet
-    if (tok.payload.device !== deviceId()) return null; // anti-copie du cache sur une autre machine
-    return tok.payload;
-  } catch { return null; }
-}
+// deviceId + vérification Ed25519 : voir src/entitlement.js (partagé avec le moteur,
+// B3 : deviceId reste paresseux/mémoïsé là-bas, zéro effet si le gate est OFF).
+const verifyToken = (tok) => verifyEntitlementToken(tok, deviceId());
 
 function readCache() { try { return loadEncrypted(CACHE_FILE()); } catch { return null; } }
 function writeCache(o) { try { saveEncrypted(CACHE_FILE(), o); } catch { /* non bloquant */ } }
@@ -98,6 +90,9 @@ function readSession() { try { return loadEncrypted(SESSION_FILE()); } catch { r
 function writeSession(o) { try { saveEncrypted(SESSION_FILE(), o); } catch { /* non bloquant */ } }
 export function logout() {
   verified = false;
+  lastVerifiedAt = 0;
+  lastGraceUntil = 0;
+  lastToken = null;
   try { fs.rmSync(SESSION_FILE(), { force: true }); } catch { /* ignore */ }
   try { fs.rmSync(CACHE_FILE(), { force: true }); } catch { /* ignore */ }
 }
@@ -192,24 +187,55 @@ async function fetchEntitlement() {
   writeCache({ ...tok, online_ok: now }); // heure de CONFIANCE du dernier online OK
   const entitled = p.active && now < p.grace_until;
   verified = entitled; // serveur autoritaire : peut rétrograder
+  if (entitled) { lastVerifiedAt = Date.now(); lastGraceUntil = p.grace_until; lastToken = tok; }
+  else { lastToken = null; } // pas d'entitlement -> rien à exposer au moteur
   return { ok: true, entitled, status: p.status, email: s.email };
 }
 
-// Décision d'accès (appelée par gate.html) : serveur d'abord, sinon grâce bornée.
+// Décision d'accès (appelée par gate.html, ET par ensureFreshAccess() pour le
+// recheck périodique / TOCTOU) : serveur d'abord, sinon grâce bornée. Chaque branche
+// met explicitement à jour `verified` (y compris à false) : un recheck qui échoue
+// doit RÉVOQUER l'accès mis en cache, pas seulement s'abstenir de le renouveler
+// (sinon un abonnement résilié resterait indéfiniment "verified" entre deux succès).
 async function checkAccess() {
   const sess = readSession();
   if (!sess) return { entitled: false, needLogin: true };
   const online = await fetchEntitlement();
   if (online.ok) return { entitled: online.entitled, status: online.status, email: sess.email };
-  if (online.needLogin) return { entitled: false, needLogin: true };
+  if (online.needLogin) { verified = false; lastToken = null; return { entitled: false, needLogin: true }; }
   // Hors-ligne : n'honorer la grâce que si le jeton signé est encore valide, lié à ce
   // compte, sous grace_until, ET qu'un check EN LIGNE a réussi il y a < OFFLINE_MAX.
   const cached = readCache(); const p = cached && verifyToken(cached);
-  if (!p || p.uid !== sess.userId) return { entitled: false, offline: true };
+  if (!p || p.uid !== sess.userId) { verified = false; lastToken = null; return { entitled: false, offline: true }; }
   const now = (await trustedNowSec()) ?? Math.floor(Date.now() / 1000);
   const entitled = p.active && now < p.grace_until && (now - (cached.online_ok || 0)) < OFFLINE_MAX;
-  if (entitled) { verified = true; return { entitled: true, offline: true, email: sess.email }; }
+  if (entitled) {
+    verified = true; lastVerifiedAt = Date.now(); lastGraceUntil = p.grace_until; lastToken = cached;
+    return { entitled: true, offline: true, email: sess.email };
+  }
+  verified = false; lastToken = null;
   return { entitled: false, offline: true };
+}
+
+// Jeton signé { payload, sig } le plus récemment honoré (ONLINE ou grâce hors-ligne
+// valide) — c'est CE jeton que le moteur (src/entitlement.js#requireEntitlement)
+// vérifie à nouveau côté engine quand gui/main.js le lui transmet, afin qu'un import
+// direct des modules moteur (hors gui/main.js) reste refusé sans jeton valide.
+export function getEntitlementToken() { return lastToken; }
+
+// Recheck paresseux, appelé par gateLocked() (gui/main.js) avant toute action gatée.
+// Renvoie true = accès accordé. Ne fait un aller-retour réseau QUE si le cache
+// `verified` est absent/périmé (fraîcheur VERIFY_FRESHNESS_MS OU grace_until signé
+// dépassé) — sinon retourne le cache tel quel, sans latence supplémentaire.
+export async function ensureFreshAccess() {
+  if (!isEnabled()) return true; // gate OFF pour ce build : comportement historique inchangé
+  if (!verified) return false; // jamais vérifié / déjà révoqué -> pas de recheck implicite
+  const nowSec = Math.floor(Date.now() / 1000);
+  const staleByTime = (Date.now() - lastVerifiedAt) > VERIFY_FRESHNESS_MS;
+  const staleByGrace = lastGraceUntil > 0 && nowSec >= lastGraceUntil;
+  if (!staleByTime && !staleByGrace) return true; // encore frais
+  const r = await checkAccess(); // met à jour verified/lastVerifiedAt/lastToken en interne
+  return !!r.entitled;
 }
 
 // --- API IPC (consommée par gate.html) ---

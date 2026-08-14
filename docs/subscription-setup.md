@@ -52,7 +52,8 @@ node -e "const{generateKeyPairSync}=require('crypto');const{publicKey,privateKey
 ## 4. Activer le gate dans le build (config BAKÉE, pas un .env)
 ⚠️ En build **packagé**, le `.env` est **ignoré** pour le gate (durcissement C2 : sinon
 l'utilisateur le désactiverait en éditant une ligne). L'activation se fait en remplissant
-`gui/gate-config.js` **AVANT** de construire l'installeur :
+`src/gate-config.js` **AVANT** de construire l'installeur (vit dans `src/` — pas `gui/` —
+car le moteur lui-même en dépend désormais pour se gater : voir `src/entitlement.js`) :
 ```js
 export const GATE = {
   SUB_GATE: '1',
@@ -69,7 +70,7 @@ On peut gater snipe-mc et pas le hub : chaque app a son propre `gate-config.js`.
 Quota d'appareils par compte : 3 (constante `MAX_DEVICES` dans `subscription-status`).
 
 ## 5. Réutiliser pour snipe-hub
-1. Copier `gui/subgate.js` + `gui/renderer/gate.html` + `gui/renderer/gate.js` (même `ENT_PUBLIC_KEY_SPKI_B64`).
+1. Copier `gui/subgate.js` + `src/entitlement.js` + `src/gate-config.js` + `gui/renderer/gate.html` + `gui/renderer/gate.js` (même `ENT_PUBLIC_KEY_SPKI_B64`, défini dans `src/entitlement.js`).
 2. Appliquer les mêmes points de câblage dans le `main.js` du hub (import, `resolveEntry()` au load, handlers `subgate:*`, gardes `gateLocked()`) + le bridge `subgate` dans son preload.
 3. **Mêmes** edge functions / table / paire Ed25519 → **un abonnement unique** déverrouille les deux apps.
 

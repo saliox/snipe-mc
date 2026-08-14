@@ -2,6 +2,7 @@
 // Microsoft. Les actions (change username, snipe, statut compte) l'utilisent.
 import { getValidToken } from '../src/auth.js';
 import { profileFromToken } from '../src/nameapi.js';
+import { getEntitlementToken } from './subgate.js';
 
 let manualToken = null;
 let manualProfile = null;
@@ -31,7 +32,9 @@ export function manualStatus() {
 // Renvoie { accessToken, profile, source }. Priorité au token manuel.
 export async function getActiveToken() {
   if (manualToken) return { accessToken: manualToken, profile: manualProfile, source: 'token' };
-  const mc = await getValidToken(); // lève si non connecté
+  // Jeton d'entitlement de la session gate courante : requis par getValidToken() côté
+  // moteur si un gate est actif pour ce build (audit : moteur nu — cf src/entitlement.js).
+  const mc = await getValidToken(getEntitlementToken()); // lève si non connecté
   return { accessToken: mc.accessToken, profile: mc.profile, source: 'microsoft' };
 }
 

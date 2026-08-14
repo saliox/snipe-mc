@@ -11,6 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import * as asar from '@electron/asar';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const electronDist = path.join(root, 'node_modules', 'electron', 'dist');
@@ -61,22 +62,44 @@ fs.rmSync(path.join(out, 'resources', 'default_app.asar'), { force: true });
 // 1b. Applique l'icône au .exe (rcedit du cache electron-builder, si dispo).
 applyExeIcon(exePath, path.join(root, 'build', 'icon.ico'));
 
-// 2. App (+ dossier build/ pour l'icône lue au runtime)
-const appDir = path.join(out, 'resources', 'app');
-fs.mkdirSync(path.join(appDir, 'node_modules'), { recursive: true });
+// 2. App (+ dossier build/ pour l'icône lue au runtime) — empaquetée en .asar, PAS
+//    livrée en fichiers .js bruts (durcissement post-audit : avant ce correctif,
+//    TOUT le code de l'app — y compris le moteur de snipe : src/auth.js,
+//    src/sniper.js, src/mojang.js, src/nameapi.js, src/ntp.js, src/securebox.js —
+//    finissait en clair, lisible/copiable, dans resources/app/, et
+//    build/installer.nsi l'installait tel quel via `File /r`). On assemble d'abord
+//    dans un dossier de STAGING temporaire (hors resources/, jamais livré tel quel),
+//    puis on l'empaquette en resources/app.asar : Electron lit un .asar nativement
+//    (aucun changement ailleurs dans le code), donc plus aucun .js source ne se
+//    retrouve posé nu sur le disque de l'utilisateur.
+//    ⚠️ Un .asar n'est PAS un coffre-fort : `npx asar extract` le déballe en une
+//    commande. Le VRAI rempart contre le bypass moteur est le gate CÔTÉ ENGINE
+//    (src/entitlement.js, appelé par snipe()/changeName()/getValidToken()/
+//    loginInteractive()) — ceci n'est qu'une couche de durcissement supplémentaire
+//    (ne plus exposer le code source en clair par défaut), pas une preuve
+//    d'inviolabilité.
+const stageDir = path.join(out, '.stage-app');
+fs.rmSync(stageDir, { recursive: true, force: true });
+fs.mkdirSync(path.join(stageDir, 'node_modules'), { recursive: true });
 // SÉCURITÉ (gate d'abonnement) : ne PAS livrer le CLI src/index.js dans l'app packagée.
-// C'est un moteur de snipe complet SANS le gate → sinon « extract asar → node src/index.js »
-// contourne l'abonnement. Le gate ne vit que dans la couche GUI (gui/main.js).
+// C'est un moteur de snipe complet qui, en CLI, appelle loginInteractive()/getValidToken()/
+// snipe() SANS jeton d'entitlement (ces derniers sont désormais gatés eux-mêmes, cf
+// src/entitlement.js — audit "moteur nu") : l'exposer ne romprait donc plus le gate,
+// mais autant ne pas fournir gratuitement un point d'entrée CLI dans le produit packagé.
 const EXCLUDE = new Set([path.resolve(root, 'src', 'index.js')]);
 for (const item of ['gui', 'src', 'package.json', 'build']) {
-  fs.cpSync(path.join(root, item), path.join(appDir, item), {
+  fs.cpSync(path.join(root, item), path.join(stageDir, item), {
     recursive: true,
     filter: (s) => !EXCLUDE.has(path.resolve(s)),
   });
 }
 for (const dep of RUNTIME_DEPS) {
-  fs.cpSync(path.join(root, 'node_modules', dep), path.join(appDir, 'node_modules', dep), { recursive: true });
+  fs.cpSync(path.join(root, 'node_modules', dep), path.join(stageDir, 'node_modules', dep), { recursive: true });
 }
+const appAsar = path.join(out, 'resources', 'app.asar');
+fs.rmSync(appAsar, { force: true });
+await asar.createPackage(stageDir, appAsar);
+fs.rmSync(stageDir, { recursive: true, force: true }); // aucun .js brut ne reste sur disque
 
 // 3. Modèle .env à côté de l'exe (l'app le cherche là en priorité)
 fs.copyFileSync(path.join(root, '.env.example'), path.join(out, '.env.example'));

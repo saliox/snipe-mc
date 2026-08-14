@@ -10,6 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { log, sleep, c } from './util.js';
 import { saveEncrypted, loadEncrypted } from './securebox.js';
+import { requireEntitlement } from './entitlement.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -187,7 +188,13 @@ async function msToMinecraft(msAccessToken) {
 // Flux interactif complet (à lancer une fois).
 // onPrompt({ verificationUri, userCode }) est appelé pour afficher le code
 // (console en CLI, fenêtre en GUI).
-export async function loginInteractive(onPrompt) {
+// `entitlement` : jeton d'entitlement signé { payload, sig } (cf src/entitlement.js).
+// AUDIT : point d'entrée moteur — un script qui importe auth.js SANS passer par
+// gui/main.js (qui fournit ce jeton depuis sa session vérifiée) est refusé ici s'il
+// existe un gate actif pour ce build, même si tous les autres modules moteur étaient
+// laissés de côté (ce flux produit un accessToken Minecraft exploitable seul).
+export async function loginInteractive(onPrompt, entitlement) {
+  requireEntitlement(entitlement);
   log.step('Connexion Microsoft (device code)');
   const dc = await requestDeviceCode();
   if (onPrompt) onPrompt({ verificationUri: dc.verification_uri, userCode: dc.user_code });
@@ -217,7 +224,12 @@ export async function loginInteractive(onPrompt) {
 }
 
 // Renvoie un token Minecraft valide, en rafraîchissant silencieusement si besoin.
-export async function getValidToken() {
+// `entitlement` : jeton d'entitlement signé { payload, sig } — mêmes garanties que
+// loginInteractive() ci-dessus (audit : moteur nu). Le cache de token local étant
+// chiffré (securebox), c'est ce garde qui empêche un script de le décrypter/rafraîchir
+// via NOTRE code sans abonnement valide.
+export async function getValidToken(entitlement) {
+  requireEntitlement(entitlement);
   const cache = loadCache();
   if (!cache) throw new Error('Non connecté. Lance : node src/index.js login');
 

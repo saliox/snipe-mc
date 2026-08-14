@@ -121,8 +121,11 @@ function updateTray() {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Ouvrir Snipe MC', click: showWindow },
     { label: monitor.on ? '● Surveillance active' : '○ Surveillance arrêtée', enabled: false },
-    // Gardé : le clic tray ne doit pas contourner l'abonnement (M1).
-    { label: monitor.on ? 'Arrêter la surveillance' : 'Démarrer la surveillance', enabled: monitor.on || !gateLocked(), click: () => { if (!monitor.on && gateLocked()) return; monitor.on ? stopMonitor() : startMonitor(); } },
+    // Gardé : le clic tray ne doit pas contourner l'abonnement (M1). `enabled` ici est
+    // un indice UI bon marché (lecture synchrone du dernier état connu, peut être
+    // périmé de quelques minutes) — l'application RÉELLE du gate a lieu de façon
+    // async dans le click handler via gateLocked() (recheck si périmé, cf TOCTOU).
+    { label: monitor.on ? 'Arrêter la surveillance' : 'Démarrer la surveillance', enabled: monitor.on || !subgate.isEnabled() || subgate.isVerified(), click: async () => { if (!monitor.on && await gateLocked()) return; monitor.on ? stopMonitor() : startMonitor(); } },
     { type: 'separator' },
     { label: 'Quitter', click: () => { app.isQuitting = true; app.quit(); } },
   ]));
@@ -130,9 +133,9 @@ function updateTray() {
 function notifyFree(name) {
   try { new Notification({ title: '🎯 Pseudo libre !', body: `${name} est disponible`, icon: fs.existsSync(ICON) ? ICON : undefined }).show(); } catch {}
 }
-function startMonitor() {
+async function startMonitor() {
   if (monitor.on) return;
-  if (gateLocked()) return; // abonnement requis (M1)
+  if (await gateLocked()) return; // abonnement requis (M1)
   monitor.on = true;
   monitor.notified.clear();
   // .catch aux points d'appel : monitorTick est async et lancé par setInterval,
@@ -150,7 +153,7 @@ function stopMonitor() {
 }
 async function monitorTick() {
   if (monitor.ticking) return;
-  if (gateLocked()) { monitor.on = false; return; } // abonnement requis (M1)
+  if (await gateLocked()) { monitor.on = false; return; } // abonnement requis (M1)
   monitor.ticking = true;
   try {
     for (const name of watchlist.getWatch()) {
@@ -173,7 +176,7 @@ async function monitorTick() {
           try {
             const active = await tryGetActiveToken();
             if (active) {
-              const cr = await changeName(name, active.accessToken);
+              const cr = await changeName(name, active.accessToken, subgate.getEntitlementToken());
               bus.emit('log', { level: cr.ok ? 'ok' : 'err', msg: cr.ok ? `Auto-claim : ${name} obtenu ! (cooldown 30 j → auto-claim coupé, veille conservée)` : `Auto-claim ${name} : ${cr.reason}`, t: Date.now() });
               if (cr.ok) {
                 // Réclamé : on le retire de la watchlist et on coupe l'auto-claim
@@ -199,6 +202,36 @@ async function monitorTick() {
   } finally { monitor.ticking = false; }
 }
 
+// --- Ré-vérification PÉRIODIQUE du gate en tâche de fond (fix TOCTOU) ---
+// gateLocked() ne recheck le backend QUE quand une action gatée est déclenchée
+// (paresseux). Sans ce timer, un abonné qui résilie/rembourse juste après avoir été
+// vérifié, puis ne déclenche plus jamais d'action gatée pendant un moment (ex.
+// surveillance tournant seule en tray, fenêtre juste ouverte sans clic), garderait un
+// accès valide jusqu'à... rien : l'app peut tourner indéfiniment. Ce timer proactif
+// détecte donc la révocation même sans interaction utilisateur.
+const SUBGATE_POLL_MS = 7 * 60 * 1000; // 7 min (fourchette 5-10 min visée par l'audit)
+let subgateTimer = null;
+function startSubgatePolling() {
+  if (subgateTimer || !subgate.isEnabled()) return; // no-op si le gate est OFF
+  subgateTimer = setInterval(async () => {
+    try {
+      const wasOk = subgate.isVerified();
+      const ok = await subgate.ensureFreshAccess();
+      if (wasOk && !ok) onSubgateAccessLost();
+    } catch (e) { console.error('[subgate] poll:', e); }
+  }, SUBGATE_POLL_MS);
+}
+// Accès perdu détecté hors d'un appel IPC gaté : coupe la surveillance en cours et
+// renvoie la fenêtre sur le gate (resolveEntry() → gate.html tant que non re-vérifié),
+// pour que l'UI reflète immédiatement la perte d'accès au lieu de rester sur
+// index.html avec des actions qui échoueraient silencieusement une à une.
+function onSubgateAccessLost() {
+  bus?.emit?.('log', { level: 'err', msg: 'Abonnement expiré ou résilié — accès reverrouillé.', t: Date.now() });
+  if (monitor.on) stopMonitor();
+  if (win && !win.isDestroyed()) { try { win.loadFile(subgate.resolveEntry()); } catch { /* ignore */ } }
+  updateTray();
+}
+
 app.whenReady().then(() => {
   // Tokens dans userData (persistant, hors dossier d'install) et chiffrés.
   process.env.SNIPE_DATA_DIR = app.getPath('userData');
@@ -213,6 +246,7 @@ app.whenReady().then(() => {
   createWindow();
   createTray();
   initUpdater(() => win);
+  startSubgatePolling();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
@@ -246,14 +280,18 @@ ipcMain.handle('subgate:signup', (_e, { email, password }) => subgate.ipcSignup(
 ipcMain.handle('subgate:refresh', () => subgate.ipcRefresh());
 ipcMain.handle('subgate:openCheckout', () => subgate.ipcOpenCheckout());
 ipcMain.handle('subgate:logout', () => subgate.ipcLogout());
-ipcMain.handle('subgate:enter', () => {
-  if (subgate.isEnabled() && !subgate.isVerified()) return { ok: false };
+ipcMain.handle('subgate:enter', async () => {
+  if (await gateLocked()) return { ok: false };
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   return { ok: true };
 });
-// Garde des IPC moteur : quand le gate est actif et l'accès non vérifié, on refuse
-// (coupe le contournement « charger index.html à la main »). No-op si flag OFF.
-function gateLocked() { return subgate.isEnabled() && !subgate.isVerified(); }
+// Garde des IPC moteur : quand le gate est actif et l'accès non vérifié/périmé, on
+// refuse (coupe le contournement « charger index.html à la main »). No-op si flag OFF.
+// ensureFreshAccess() re-vérifie auprès du backend si le cache `verified` est périmé
+// (fraîcheur ou grace_until dépassés) AVANT de trancher — c'est le fix TOCTOU : une
+// résiliation Stripe survenue après la vérification initiale finit par être détectée
+// ici, pas seulement au prochain redémarrage de l'app.
+async function gateLocked() { return subgate.isEnabled() && !(await subgate.ensureFreshAccess()); }
 
 // --- Compte / token ---
 // Profil actif = token manuel si présent, sinon login Microsoft en cache.
@@ -286,19 +324,19 @@ ipcMain.handle('login', async () => {
     const mc = await loginInteractive((prompt) => {
       win.webContents.send('device-code', prompt);
       shell.openExternal(prompt.verificationUri).catch(() => {});
-    });
+    }, subgate.getEntitlementToken());
     return { ok: true, profile: mc.profile };
   } catch (e) { return { ok: false, error: e.message }; }
 });
 
 // --- Change username ---
 ipcMain.handle('change-username', async (_e, name) => {
-  if (gateLocked()) return { ok: false, error: 'LOCKED' };
+  if (await gateLocked()) return { ok: false, error: 'LOCKED' };
   try {
     if (!validName(name)) return { ok: false, error: 'Pseudo invalide (3-16 car., [A-Za-z0-9_]).' };
     const active = await tryGetActiveToken();
     if (!active) return { ok: false, error: 'Aucun token : colle un bearer token ou connecte-toi (MS).' };
-    const res = await changeName(name, active.accessToken);
+    const res = await changeName(name, active.accessToken, subgate.getEntitlementToken());
     if (res.ok) { bus?.emit?.('log', { level: 'ok', msg: `Pseudo changé en ${res.name} !`, t: Date.now() }); }
     return { ok: res.ok, status: res.status, reason: res.reason, name: res.name };
   } catch (e) { return { ok: false, error: e.message }; }
@@ -306,7 +344,7 @@ ipcMain.handle('change-username', async (_e, name) => {
 
 // Cooldown de renommage (30 j) du compte actif.
 ipcMain.handle('namechange-info', async () => {
-  if (gateLocked()) return { ok: false, error: 'LOCKED' };
+  if (await gateLocked()) return { ok: false, error: 'LOCKED' };
   try {
     const active = await tryGetActiveToken();
     if (!active) return { ok: false, error: 'Aucun token actif.' };
@@ -351,7 +389,7 @@ ipcMain.handle('measure-latency', async () => {
 });
 
 ipcMain.handle('check', async (_e, name) => {
-  if (gateLocked()) return { ok: false, error: 'LOCKED' };
+  if (await gateLocked()) return { ok: false, error: 'LOCKED' };
   try {
     const out = { ok: true, name, valid: validName(name) };
     out.seen = history.lookup(name); // « déjà vu » = état PRÉCÉDENT (avant ce check)
@@ -371,7 +409,7 @@ ipcMain.handle('check', async (_e, name) => {
 ipcMain.handle('history-stats', () => { try { return { ok: true, ...history.stats() }; } catch (e) { return { ok: false, error: e.message }; } });
 ipcMain.handle('history-lookup', (_e, name) => { try { return { ok: true, entry: history.lookup(name) }; } catch (e) { return { ok: false, error: e.message }; } });
 ipcMain.handle('history-search', (_e, q) => { try { return { ok: true, names: history.searchFree(q) }; } catch (e) { return { ok: false, error: e.message }; } });
-ipcMain.handle('history-free-all', () => { if (gateLocked()) return { ok: false, error: 'LOCKED' }; try { return { ok: true, names: history.allFree() }; } catch (e) { return { ok: false, error: e.message }; } });
+ipcMain.handle('history-free-all', async () => { if (await gateLocked()) return { ok: false, error: 'LOCKED' }; try { return { ok: true, names: history.allFree() }; } catch (e) { return { ok: false, error: e.message }; } });
 ipcMain.handle('history-clear', () => { try { history.clear(); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; } });
 
 // --- Checkpoint de session (reprise) : fichier userData, persistant et fiable
@@ -413,7 +451,7 @@ ipcMain.handle('watch-get', () => { try { return { ok: true, names: watchlist.ge
 ipcMain.handle('watch-add', (_e, names) => { try { const arr = Array.isArray(names) ? names : [names]; return { ok: true, names: watchlist.addWatch(arr) }; } catch (e) { return { ok: false, error: e.message }; } });
 ipcMain.handle('watch-remove', (_e, name) => { try { return { ok: true, names: watchlist.removeWatch(name) }; } catch (e) { return { ok: false, error: e.message }; } });
 ipcMain.handle('watch-clear', () => { try { return { ok: true, names: watchlist.clearWatch() }; } catch (e) { return { ok: false, error: e.message }; } });
-ipcMain.handle('monitor-start', () => { if (gateLocked()) return { ok: false, error: 'LOCKED' }; startMonitor(); return { ok: true, on: monitor.on }; });
+ipcMain.handle('monitor-start', async () => { if (await gateLocked()) return { ok: false, error: 'LOCKED' }; await startMonitor(); return { ok: true, on: monitor.on }; });
 ipcMain.handle('monitor-stop', () => { stopMonitor(); return { ok: true, on: monitor.on }; });
 ipcMain.handle('monitor-status', () => ({ ok: true, on: monitor.on, autoclaim: monitor.autoclaim }));
 ipcMain.handle('monitor-autoclaim', (_e, v) => { monitor.autoclaim = !!v; return { ok: true, autoclaim: monitor.autoclaim }; });
@@ -505,7 +543,7 @@ ipcMain.handle('save-txt', async (_e, { suggested, content }) => {
 
 // --- Check en masse ---
 ipcMain.handle('bulk-check', async (_e, { names, delayMs, useToken, proxies }) => {
-  if (gateLocked()) return { ok: false, error: 'LOCKED' };
+  if (await gateLocked()) return { ok: false, error: 'LOCKED' };
   // Anti-concurrence : deux scans simultanés partageraient bulkStop + émettraient
   // des résultats entrelacés (progression/historique corrompus).
   if (bulkBusy) return { ok: false, error: 'Un scan est déjà en cours.' };
@@ -570,7 +608,7 @@ ipcMain.handle('test-proxies', async (_e, lines) => {
 
 // --- Snipe ---
 ipcMain.handle('snipe', async (_e, opts) => {
-  if (gateLocked()) return { ok: false, error: 'LOCKED' };
+  if (await gateLocked()) return { ok: false, error: 'LOCKED' };
   try {
     if (!validName(opts.name)) return { ok: false, error: 'Pseudo invalide (3-16 car., [A-Za-z0-9_]).' };
     const common = {
@@ -582,6 +620,9 @@ ipcMain.handle('snipe', async (_e, opts) => {
       leadMs: opts.leadMs,
       connections: opts.connections,
       skipNtp: !!opts.skipNtp,
+      // Jeton d'entitlement de la session gate courante : requis par snipe() côté
+      // moteur si un gate est actif pour ce build (audit : moteur nu, cf src/entitlement.js).
+      entitlement: subgate.getEntitlementToken(),
     };
 
     // Multi-comptes : tire depuis tous les comptes enregistrés en parallèle.
@@ -606,7 +647,7 @@ ipcMain.handle('snipe', async (_e, opts) => {
     // Token-provider seulement pour la source Microsoft (rafraîchissable). Un bearer
     // collé à la main n'est pas rafraîchissable : un 401 sera alors signalé, pas bouclé.
     const getToken = active.source === 'microsoft'
-      ? async () => (await getValidToken()).accessToken
+      ? async () => (await getValidToken(subgate.getEntitlementToken())).accessToken
       : undefined;
 
     // Multi-cibles : snipe plusieurs pseudos EN PARALLÈLE avec le compte actif ;

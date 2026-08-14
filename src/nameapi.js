@@ -1,6 +1,7 @@
 // Actions authentifiées sur le compte via un token d'accès Minecraft.
 // Le token peut venir du login Microsoft (auth.js) ou être collé à la main.
 import { request } from 'undici';
+import { requireEntitlement } from './entitlement.js';
 
 const HOST = 'https://api.minecraftservices.com';
 
@@ -34,8 +35,13 @@ export async function nameChangeInfo(token) {
 }
 
 // Change le pseudo du compte lié au token.
+// `entitlement` : jeton d'entitlement signé { payload, sig } (cf src/entitlement.js).
+// AUDIT : point d'entrée moteur — c'est l'appel qui consomme réellement le renommage
+// payant ; un script qui importe nameapi.js directement (hors gui/main.js) est
+// refusé ici s'il existe un gate actif pour ce build.
 // Renvoie { ok, status, reason }.
-export async function changeName(name, token) {
+export async function changeName(name, token, entitlement) {
+  requireEntitlement(entitlement);
   const { statusCode, headers, body } = await request(
     `${HOST}/minecraft/profile/name/${encodeURIComponent(name)}`,
     { method: 'PUT', headers: { authorization: `Bearer ${token}` } }
